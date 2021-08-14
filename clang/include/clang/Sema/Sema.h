@@ -50,6 +50,7 @@
 #include "clang/Basic/TemplateKinds.h"
 #include "clang/Basic/TypeTraits.h"
 #include "clang/Sema/AnalysisBasedWarnings.h"
+#include "clang/Sema/CIRBasedWarnings.h"
 #include "clang/Sema/CleanupInfo.h"
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/ExternalSemaSource.h"
@@ -10585,6 +10586,299 @@ public:
   /// template-deduction context object, which can be used to capture
   /// diagnostics that will be suppressed.
   std::optional<sema::TemplateDeductionInfo *> isSFINAEContext() const;
+
+  /// Whether the AST is currently being rebuilt to correct immediate
+  /// invocations. Immediate invocation candidates and references to consteval
+  /// functions aren't tracked when this is set.
+  bool RebuildingImmediateInvocation = false;
+
+  /// Used to change context to isConstantEvaluated without pushing a heavy
+  /// ExpressionEvaluationContextRecord object.
+  bool isConstantEvaluatedOverride = false;
+
+  const ExpressionEvaluationContextRecord &currentEvaluationContext() const {
+    assert(!ExprEvalContexts.empty() &&
+           "Must be in an expression evaluation context");
+    return ExprEvalContexts.back();
+  };
+
+  bool isConstantEvaluatedContext() const {
+    return currentEvaluationContext().isConstantEvaluated() ||
+           isConstantEvaluatedOverride;
+  }
+
+  bool isAlwaysConstantEvaluatedContext() const {
+    const ExpressionEvaluationContextRecord &Ctx = currentEvaluationContext();
+    return (Ctx.isConstantEvaluated() || isConstantEvaluatedOverride) &&
+           !Ctx.InConditionallyConstantEvaluateContext;
+  }
+
+  /// Determines whether we are currently in a context that
+  /// is not evaluated as per C++ [expr] p5.
+  bool isUnevaluatedContext() const {
+    return currentEvaluationContext().isUnevaluated();
+  }
+
+  bool isImmediateFunctionContext() const {
+    return currentEvaluationContext().isImmediateFunctionContext();
+  }
+
+  bool isCheckingDefaultArgumentOrInitializer() const {
+    const ExpressionEvaluationContextRecord &Ctx = currentEvaluationContext();
+    return (Ctx.Context ==
+            ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed) ||
+           Ctx.IsCurrentlyCheckingDefaultArgumentOrInitializer;
+  }
+
+  std::optional<ExpressionEvaluationContextRecord::InitializationContext>
+  InnermostDeclarationWithDelayedImmediateInvocations() const {
+    assert(!ExprEvalContexts.empty() &&
+           "Must be in an expression evaluation context");
+    for (const auto &Ctx : llvm::reverse(ExprEvalContexts)) {
+      if (Ctx.Context == ExpressionEvaluationContext::PotentiallyEvaluated &&
+          Ctx.DelayedDefaultInitializationContext)
+        return Ctx.DelayedDefaultInitializationContext;
+      if (Ctx.isConstantEvaluated() || Ctx.isImmediateFunctionContext() ||
+          Ctx.isUnevaluated())
+        break;
+    }
+    return std::nullopt;
+  }
+
+  std::optional<ExpressionEvaluationContextRecord::InitializationContext>
+  OutermostDeclarationWithDelayedImmediateInvocations() const {
+    assert(!ExprEvalContexts.empty() &&
+           "Must be in an expression evaluation context");
+    std::optional<ExpressionEvaluationContextRecord::InitializationContext> Res;
+    for (auto &Ctx : llvm::reverse(ExprEvalContexts)) {
+      if (Ctx.Context == ExpressionEvaluationContext::PotentiallyEvaluated &&
+          !Ctx.DelayedDefaultInitializationContext && Res)
+        break;
+      if (Ctx.isConstantEvaluated() || Ctx.isImmediateFunctionContext() ||
+          Ctx.isUnevaluated())
+        break;
+      Res = Ctx.DelayedDefaultInitializationContext;
+    }
+    return Res;
+  }
+
+  /// RAII class used to determine whether SFINAE has
+  /// trapped any errors that occur during template argument
+  /// deduction.
+  class SFINAETrap {
+    Sema &SemaRef;
+    unsigned PrevSFINAEErrors;
+    bool PrevInNonInstantiationSFINAEContext;
+    bool PrevAccessCheckingSFINAE;
+    bool PrevLastDiagnosticIgnored;
+
+  public:
+    explicit SFINAETrap(Sema &SemaRef, bool AccessCheckingSFINAE = false)
+      : SemaRef(SemaRef), PrevSFINAEErrors(SemaRef.NumSFINAEErrors),
+        PrevInNonInstantiationSFINAEContext(
+                                      SemaRef.InNonInstantiationSFINAEContext),
+        PrevAccessCheckingSFINAE(SemaRef.AccessCheckingSFINAE),
+        PrevLastDiagnosticIgnored(
+            SemaRef.getDiagnostics().isLastDiagnosticIgnored())
+    {
+      if (!SemaRef.isSFINAEContext())
+        SemaRef.InNonInstantiationSFINAEContext = true;
+      SemaRef.AccessCheckingSFINAE = AccessCheckingSFINAE;
+    }
+
+    ~SFINAETrap() {
+      SemaRef.NumSFINAEErrors = PrevSFINAEErrors;
+      SemaRef.InNonInstantiationSFINAEContext
+        = PrevInNonInstantiationSFINAEContext;
+      SemaRef.AccessCheckingSFINAE = PrevAccessCheckingSFINAE;
+      SemaRef.getDiagnostics().setLastDiagnosticIgnored(
+          PrevLastDiagnosticIgnored);
+    }
+
+    /// Determine whether any SFINAE errors have been trapped.
+    bool hasErrorOccurred() const {
+      return SemaRef.NumSFINAEErrors > PrevSFINAEErrors;
+    }
+  };
+
+  /// RAII class used to indicate that we are performing provisional
+  /// semantic analysis to determine the validity of a construct, so
+  /// typo-correction and diagnostics in the immediate context (not within
+  /// implicitly-instantiated templates) should be suppressed.
+  class TentativeAnalysisScope {
+    Sema &SemaRef;
+    // FIXME: Using a SFINAETrap for this is a hack.
+    SFINAETrap Trap;
+    bool PrevDisableTypoCorrection;
+  public:
+    explicit TentativeAnalysisScope(Sema &SemaRef)
+        : SemaRef(SemaRef), Trap(SemaRef, true),
+          PrevDisableTypoCorrection(SemaRef.DisableTypoCorrection) {
+      SemaRef.DisableTypoCorrection = true;
+    }
+    ~TentativeAnalysisScope() {
+      SemaRef.DisableTypoCorrection = PrevDisableTypoCorrection;
+    }
+  };
+
+  /// The current instantiation scope used to store local
+  /// variables.
+  LocalInstantiationScope *CurrentInstantiationScope;
+
+  /// Tracks whether we are in a context where typo correction is
+  /// disabled.
+  bool DisableTypoCorrection;
+
+  /// The number of typos corrected by CorrectTypo.
+  unsigned TyposCorrected;
+
+  typedef llvm::SmallSet<SourceLocation, 2> SrcLocSet;
+  typedef llvm::DenseMap<IdentifierInfo *, SrcLocSet> IdentifierSourceLocations;
+
+  /// A cache containing identifiers for which typo correction failed and
+  /// their locations, so that repeated attempts to correct an identifier in a
+  /// given location are ignored if typo correction already failed for it.
+  IdentifierSourceLocations TypoCorrectionFailures;
+
+  /// Worker object for performing CFG-based warnings.
+  sema::AnalysisBasedWarnings AnalysisWarnings;
+  threadSafety::BeforeSet *ThreadSafetyDeclCache;
+
+  /// Worker object for performing CIR based warnings.
+  sema::CIRBasedWarnings CIRWarnings;
+
+  /// An entity for which implicit template instantiation is required.
+  ///
+  /// The source location associated with the declaration is the first place in
+  /// the source code where the declaration was "used". It is not necessarily
+  /// the point of instantiation (which will be either before or after the
+  /// namespace-scope declaration that triggered this implicit instantiation),
+  /// However, it is the location that diagnostics should generally refer to,
+  /// because users will need to know what code triggered the instantiation.
+  typedef std::pair<ValueDecl *, SourceLocation> PendingImplicitInstantiation;
+
+  /// The queue of implicit template instantiations that are required
+  /// but have not yet been performed.
+  std::deque<PendingImplicitInstantiation> PendingInstantiations;
+
+  /// Queue of implicit template instantiations that cannot be performed
+  /// eagerly.
+  SmallVector<PendingImplicitInstantiation, 1> LateParsedInstantiations;
+
+  SmallVector<SmallVector<VTableUse, 16>, 8> SavedVTableUses;
+  SmallVector<std::deque<PendingImplicitInstantiation>, 8>
+      SavedPendingInstantiations;
+
+  class GlobalEagerInstantiationScope {
+  public:
+    GlobalEagerInstantiationScope(Sema &S, bool Enabled)
+        : S(S), Enabled(Enabled) {
+      if (!Enabled) return;
+
+      S.SavedPendingInstantiations.emplace_back();
+      S.SavedPendingInstantiations.back().swap(S.PendingInstantiations);
+
+      S.SavedVTableUses.emplace_back();
+      S.SavedVTableUses.back().swap(S.VTableUses);
+    }
+
+    void perform() {
+      if (Enabled) {
+        S.DefineUsedVTables();
+        S.PerformPendingInstantiations();
+      }
+    }
+
+    ~GlobalEagerInstantiationScope() {
+      if (!Enabled) return;
+
+      // Restore the set of pending vtables.
+      assert(S.VTableUses.empty() &&
+             "VTableUses should be empty before it is discarded.");
+      S.VTableUses.swap(S.SavedVTableUses.back());
+      S.SavedVTableUses.pop_back();
+
+      // Restore the set of pending implicit instantiations.
+      if (S.TUKind != TU_Prefix || !S.LangOpts.PCHInstantiateTemplates) {
+        assert(S.PendingInstantiations.empty() &&
+               "PendingInstantiations should be empty before it is discarded.");
+        S.PendingInstantiations.swap(S.SavedPendingInstantiations.back());
+        S.SavedPendingInstantiations.pop_back();
+      } else {
+        // Template instantiations in the PCH may be delayed until the TU.
+        S.PendingInstantiations.swap(S.SavedPendingInstantiations.back());
+        S.PendingInstantiations.insert(
+            S.PendingInstantiations.end(),
+            S.SavedPendingInstantiations.back().begin(),
+            S.SavedPendingInstantiations.back().end());
+        S.SavedPendingInstantiations.pop_back();
+      }
+    }
+
+  private:
+    Sema &S;
+    bool Enabled;
+  };
+
+  /// The queue of implicit template instantiations that are required
+  /// and must be performed within the current local scope.
+  ///
+  /// This queue is only used for member functions of local classes in
+  /// templates, which must be instantiated in the same scope as their
+  /// enclosing function, so that they can reference function-local
+  /// types, static variables, enumerators, etc.
+  std::deque<PendingImplicitInstantiation> PendingLocalImplicitInstantiations;
+
+  class LocalEagerInstantiationScope {
+  public:
+    LocalEagerInstantiationScope(Sema &S) : S(S) {
+      SavedPendingLocalImplicitInstantiations.swap(
+          S.PendingLocalImplicitInstantiations);
+    }
+
+    void perform() { S.PerformPendingInstantiations(/*LocalOnly=*/true); }
+
+    ~LocalEagerInstantiationScope() {
+      assert(S.PendingLocalImplicitInstantiations.empty() &&
+             "there shouldn't be any pending local implicit instantiations");
+      SavedPendingLocalImplicitInstantiations.swap(
+          S.PendingLocalImplicitInstantiations);
+    }
+
+  private:
+    Sema &S;
+    std::deque<PendingImplicitInstantiation>
+        SavedPendingLocalImplicitInstantiations;
+  };
+
+  /// A helper class for building up ExtParameterInfos.
+  class ExtParameterInfoBuilder {
+    SmallVector<FunctionProtoType::ExtParameterInfo, 16> Infos;
+    bool HasInteresting = false;
+
+  public:
+    /// Set the ExtParameterInfo for the parameter at the given index,
+    ///
+    void set(unsigned index, FunctionProtoType::ExtParameterInfo info) {
+      assert(Infos.size() <= index);
+      Infos.resize(index);
+      Infos.push_back(info);
+
+      if (!HasInteresting)
+        HasInteresting = (info != FunctionProtoType::ExtParameterInfo());
+    }
+
+    /// Return a pointer (suitable for setting in an ExtProtoInfo) to the
+    /// ExtParameterInfo array we've built up.
+    const FunctionProtoType::ExtParameterInfo *
+    getPointerOrNull(unsigned numParams) {
+      if (!HasInteresting) return nullptr;
+      Infos.resize(numParams);
+      return Infos.data();
+    }
+  };
+
+  void PerformPendingInstantiations(bool LocalOnly = false);
 
   TypeSourceInfo *SubstType(TypeSourceInfo *T,
                             const MultiLevelTemplateArgumentList &TemplateArgs,
