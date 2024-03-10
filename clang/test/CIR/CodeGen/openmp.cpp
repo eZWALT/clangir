@@ -34,3 +34,22 @@ void omp_parallel_2() {
   y = x + 1;
 }
 }
+
+// CHECK: cir.func
+void omp_taskyield_1(){
+// CHECK: omp.taskyield
+  #pragma omp taskyield
+}
+
+// CHECK: cir.func
+void omp_taskwait_1(){
+// CHECK: omp.taskwait
+  #pragma omp taskwait
+}
+
+
+// CHECK: cir.func
+void omp_barrier_1(){
+// CHECK: omp.barrier
+  #pragma omp barrier
+}
