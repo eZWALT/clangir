@@ -14,7 +14,6 @@
 #include "CIRGenModule.h"
 #include "CIRGenOpenMPRuntime.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
-#include <mlir/Support/LogicalResult.h>
 
 using namespace cir;
 using namespace clang;
