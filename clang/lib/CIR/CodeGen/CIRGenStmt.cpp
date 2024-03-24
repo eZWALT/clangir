@@ -179,12 +179,6 @@ mlir::LogicalResult CIRGenFunction::buildStmt(const Stmt *S,
   // OMP directives:
   case Stmt::OMPParallelDirectiveClass:
     return buildOMPParallelDirective(cast<OMPParallelDirective>(*S));
-  case Stmt::OMPTaskwaitDirectiveClass:
-    return buildOMPTaskwaitDirective(cast<OMPTaskwaitDirective>(*S));
-  case Stmt::OMPTaskyieldDirectiveClass:
-    return buildOMPTaskyieldDirective(cast<OMPTaskyieldDirective>(*S));
-  case Stmt::OMPBarrierDirectiveClass:
-    return buildOMPBarrierDirective(cast<OMPBarrierDirective>(*S));
   // Unsupported AST nodes:
   case Stmt::CapturedStmtClass:
   case Stmt::ObjCAtTryStmtClass:
@@ -210,6 +204,9 @@ mlir::LogicalResult CIRGenFunction::buildStmt(const Stmt *S,
   case Stmt::OMPParallelMasterDirectiveClass:
   case Stmt::OMPParallelSectionsDirectiveClass:
   case Stmt::OMPTaskDirectiveClass:
+  case Stmt::OMPTaskyieldDirectiveClass:
+  case Stmt::OMPBarrierDirectiveClass:
+  case Stmt::OMPTaskwaitDirectiveClass:
   case Stmt::OMPTaskgroupDirectiveClass:
   case Stmt::OMPFlushDirectiveClass:
   case Stmt::OMPDepobjDirectiveClass:
@@ -309,6 +306,8 @@ mlir::LogicalResult CIRGenFunction::buildSimpleStmt(const Stmt *S,
     return buildBreakStmt(cast<BreakStmt>(*S));
 
   case Stmt::AttributedStmtClass:
+    return buildAttributedStmt(cast<AttributedStmt>(*S));
+
   case Stmt::SEHLeaveStmtClass:
     llvm::errs() << "CIR codegen for '" << S->getStmtClassName()
                  << "' not implemented\n";
@@ -326,6 +325,23 @@ mlir::LogicalResult CIRGenFunction::buildLabelStmt(const clang::LabelStmt &S) {
   assert(!(getContext().getLangOpts().EHAsynch && S.isSideEntry()));
 
   return buildStmt(S.getSubStmt(), /* useCurrentScope */ true);
+}
+
+mlir::LogicalResult
+CIRGenFunction::buildAttributedStmt(const AttributedStmt &S) {
+  for (const auto *A : S.getAttrs()) {
+    switch (A->getKind()) {
+    case attr::NoMerge:
+    case attr::NoInline:
+    case attr::AlwaysInline:
+    case attr::MustTail:
+      llvm_unreachable("NIY attributes");
+    default:
+      break;
+    }
+  }
+
+  return buildStmt(S.getSubStmt(), true, S.getAttrs());
 }
 
 // Add terminating yield on body regions (loops, ...) in case there are

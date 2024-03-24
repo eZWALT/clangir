@@ -31,11 +31,7 @@ if(CLANG_INCLUDE_TESTS)
 endif()
 add_subdirectory(Interpreter)
 add_subdirectory(Support)
-<<<<<<< HEAD
 
 if(CLANG_ENABLE_CIR)
   add_subdirectory(CIR)
 endif()
-=======
-add_subdirectory(CIR)
->>>>>>> 90a0c4bb8b11 ([CIR] Add more dialect bits for a return op, add more builder content)

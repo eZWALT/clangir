@@ -19,6 +19,7 @@
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/DiagnosticCategories.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Dialect/IR/FPEnv.h"
@@ -1553,8 +1554,8 @@ void CIRGenFunction::buildVariablyModifiedType(QualType type) {
 
     const Type *ty = type.getTypePtr();
     switch (ty->getTypeClass()) {
-    case Type::CountAttributed:
-    case Type::PackIndexing:
+    case clang::Type::CountAttributed:
+    case clang::Type::PackIndexing:
       llvm_unreachable("NYI");
 
 #define TYPE(Class, Base)

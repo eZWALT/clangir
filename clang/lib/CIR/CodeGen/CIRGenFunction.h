@@ -986,15 +986,13 @@ public:
   mlir::LogicalResult buildLabel(const clang::LabelDecl *D);
   mlir::LogicalResult buildLabelStmt(const clang::LabelStmt &S);
 
+  mlir::LogicalResult buildAttributedStmt(const AttributedStmt &S);
+
   mlir::LogicalResult buildBreakStmt(const clang::BreakStmt &S);
   mlir::LogicalResult buildContinueStmt(const clang::ContinueStmt &S);
 
   // OpenMP gen functions:
   mlir::LogicalResult buildOMPParallelDirective(const OMPParallelDirective &S);
-  mlir::LogicalResult buildOMPTaskwaitDirective(const OMPTaskwaitDirective &S);
-  mlir::LogicalResult
-  buildOMPTaskyieldDirective(const OMPTaskyieldDirective &S);
-  mlir::LogicalResult buildOMPBarrierDirective(const OMPBarrierDirective &S);
 
   LValue buildOpaqueValueLValue(const OpaqueValueExpr *e);
 
@@ -1533,6 +1531,7 @@ public:
 
   LValue buildCheckedLValue(const Expr *E, TypeCheckKind TCK);
   LValue buildMemberExpr(const MemberExpr *E);
+  LValue buildCompoundLiteralLValue(const CompoundLiteralExpr *E);
 
   /// Specifies which type of sanitizer check to apply when handling a
   /// particular builtin.
