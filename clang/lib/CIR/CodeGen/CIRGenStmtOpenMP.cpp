@@ -10,11 +10,27 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <clang/AST/StmtIterator.h>
+#include <mlir/IR/Builders.h>
+#include <mlir/IR/Location.h>
+#include <mlir/Support/LogicalResult.h>
+
+#include "CIRClauseProcessor.h"
 #include "CIRGenFunction.h"
 #include "CIRGenOpenMPRuntime.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/IR/Value.h"
+
 #include <clang/AST/ASTFwd.h>
+#include <clang/AST/StmtOpenMP.h>
 #include <clang/Basic/OpenMPKinds.h>
+#include <cstdint>
+
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include <mlir/IR/Attributes.h>
+#include <mlir/IR/BuiltinAttributeInterfaces.h>
+#include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/BuiltinTypes.h>
 
 using namespace cir;
 using namespace clang;
@@ -52,6 +68,30 @@ static void buildDependences(const OMPExecutableDirective &S,
         Data.Dependences.emplace_back(C->getDependencyKind(), C->getModifier());
     DD.DepExprs.append(C->varlist_begin(), C->varlist_end());
   }
+}
+
+// Operation to create the captured statement of any OpenMP directive
+template <typename OmpOp>
+mlir::LogicalResult CIRGenFunction::buildCapturedStatement(
+    OmpOp &operation, const OMPExecutableDirective &S,
+    OpenMPDirectiveKind DKind, bool useCurrentScope) {
+  mlir::Location scopeLoc = getLoc(S.getSourceRange());
+  const Stmt *capturedStmt = S.getCapturedStmt(DKind)->getCapturedStmt();
+  mlir::LogicalResult res = mlir::success();
+  mlir::Block &block = operation.getRegion().emplaceBlock();
+  mlir::OpBuilder::InsertionGuard guardCase(builder);
+  builder.setInsertionPointToEnd(&block);
+  // Create a scope for the OpenMP region.
+  builder.create<mlir::cir::ScopeOp>(
+      scopeLoc, /*scopeBuilder=*/
+      [&](mlir::OpBuilder &b, mlir::Location loc) {
+        LexicalScope lexScope{*this, scopeLoc, builder.getInsertionBlock()};
+        // Emit the body of the region.
+        if (buildStmt(capturedStmt, useCurrentScope).failed())
+          res = mlir::failure();
+      });
+  builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
+  return res;
 }
 
 mlir::LogicalResult
@@ -110,5 +150,48 @@ CIRGenFunction::buildOMPBarrierDirective(const OMPBarrierDirective &S) {
   // Creation of an omp.barrier operation
   auto barrierOp = builder.create<mlir::omp::BarrierOp>(scopeLoc);
 
+  return res;
+}
+
+// TODO: it should be emitted through runtime and follow Clang Skeleton
+mlir::LogicalResult
+CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
+  mlir::LogicalResult res = mlir::success();
+  auto scopeLoc = getLoc(S.getSourceRange());
+
+  // Create the values and attributes that will be consumed by omp.task
+  mlir::UnitAttr untiedAttr, mergeableAttr;
+  mlir::Value finalOperand, ifOperand, priorityOperand;
+  // TODO
+  mlir::ArrayAttr dependTypeOperands;
+  // TODO
+  llvm::SmallVector<mlir::Value> dependOperands;
+
+  // Evalutes clauses
+  CIRClauseProcessor cp = CIRClauseProcessor(*this);
+  cp.processUntied(S, untiedAttr);
+  cp.processMergeable(S, mergeableAttr);
+  cp.processFinal(S, finalOperand);
+  cp.processIf(S, ifOperand);
+  cp.processPriority(S, priorityOperand);
+
+  // Create a `omp.task` operation
+  // TODO: add support to these OpenMP v5 features
+  mlir::omp::TaskOp taskOp = builder.create<mlir::omp::TaskOp>(
+      /*Location*/ scopeLoc,
+      /*optional If value*/ ifOperand,
+      /*optional Final value*/ finalOperand,
+      /*optional Untied attribute*/ untiedAttr,
+      /*optional Mergeable attribute*/ mergeableAttr,
+      /*In Reduction variables*/ mlir::ValueRange(),
+      /*optional In Reductions*/ nullptr,
+      /*optional priority value*/ priorityOperand,
+      /*optional Dependency Types values*/ dependTypeOperands,
+      /*Dependencies values*/ dependOperands,
+      /*Allocate values*/ mlir::ValueRange(),
+      /*Allocator values*/ mlir::ValueRange());
+  // Build the captured statement CIR region
+  res = buildCapturedStatement(taskOp, S, OpenMPDirectiveKind::OMPD_task,
+                               /*useCurrentScope*/ true);
   return res;
 }

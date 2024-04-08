@@ -27,6 +27,8 @@
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/TargetInfo.h"
+#include <clang/AST/ASTFwd.h>
+#include <clang/Basic/OpenMPKinds.h>
 
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
@@ -997,6 +999,12 @@ public:
   mlir::LogicalResult
   buildOMPTaskyieldDirective(const OMPTaskyieldDirective &S);
   mlir::LogicalResult buildOMPBarrierDirective(const OMPBarrierDirective &S);
+  mlir::LogicalResult buildOMPTaskDirective(const OMPTaskDirective &S);
+
+  template <typename OmpOp>
+  mlir::LogicalResult
+  buildCapturedStatement(OmpOp &operation, const OMPExecutableDirective &S,
+                         OpenMPDirectiveKind DKind, bool useCurrentScope);
 
   LValue buildOpaqueValueLValue(const OpaqueValueExpr *e);
 
