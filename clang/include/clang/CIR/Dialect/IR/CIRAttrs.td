@@ -512,6 +512,97 @@ def VTableAttr : CIR_Attr<"VTable", "vtable", [TypedAttrInterface]> {
 }
 
 //===----------------------------------------------------------------------===//
+// StructLayoutAttr
+//===----------------------------------------------------------------------===//
+
+// Used to decouple layout information from the struct type. StructType's
+// uses this attribute to cache that information.
+
+def StructLayoutAttr : CIR_Attr<"StructLayout", "struct_layout"> {
+  let summary = "ABI specific information about a struct layout";
+  let description = [{
+    Holds layout information often queried by !cir.struct users
+    during lowering passes and optimizations.
+  }];
+
+  let parameters = (ins "unsigned":$size,
+                        "unsigned":$alignment,
+                        "bool":$padded,
+                        "mlir::Type":$largest_member,
+                        "mlir::ArrayAttr":$offsets);
+
+  let builders = [
+    AttrBuilderWithInferredContext<(ins "unsigned":$size,
+                                        "unsigned":$alignment,
+                                        "bool":$padded,
+                                        "mlir::Type":$largest_member,
+                                        "mlir::ArrayAttr":$offsets), [{
+      return $_get(largest_member.getContext(), size, alignment, padded,
+                   largest_member, offsets);
+    }]>,
+  ];
+
+  let genVerifyDecl = 1;
+  let assemblyFormat = [{
+    `<`
+      struct($size, $alignment, $padded, $largest_member, $offsets)
+    `>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// DynamicCastInfoAttr
+//===----------------------------------------------------------------------===//
+
+def DynamicCastInfoAttr
+    : CIR_Attr<"DynamicCastInfo", "dyn_cast_info"> {
+  let summary = "ABI specific information about a dynamic cast";
+  let description = [{
+    Provide ABI specific information about a dynamic cast operation.
+
+    The `srcRtti` and the `destRtti` parameters give the RTTI of the source
+    struct type and the destination struct type, respectively.
+
+    The `runtimeFunc` parameter gives the `__dynamic_cast` function which is
+    provided by the runtime. The `badCastFunc` parameter gives the
+    `__cxa_bad_cast` function which is also provided by the runtime.
+
+    The `offsetHint` parameter gives the hint value that should be passed to the
+    `__dynamic_cast` runtime function.
+  }];
+
+  let parameters = (ins GlobalViewAttr:$srcRtti,
+                        GlobalViewAttr:$destRtti,
+                        "FlatSymbolRefAttr":$runtimeFunc,
+                        "FlatSymbolRefAttr":$badCastFunc,
+                        IntAttr:$offsetHint);
+
+  let builders = [
+    AttrBuilderWithInferredContext<(ins "GlobalViewAttr":$srcRtti,
+                                        "GlobalViewAttr":$destRtti,
+                                        "FlatSymbolRefAttr":$runtimeFunc,
+                                        "FlatSymbolRefAttr":$badCastFunc,
+                                        "IntAttr":$offsetHint), [{
+      return $_get(srcRtti.getContext(), srcRtti, destRtti, runtimeFunc,
+                   badCastFunc, offsetHint);
+    }]>,
+  ];
+
+  let genVerifyDecl = 1;
+  let assemblyFormat = [{
+    `<`
+      qualified($srcRtti) `,` qualified($destRtti) `,`
+      $runtimeFunc `,` $badCastFunc `,` qualified($offsetHint)
+    `>`
+  }];
+
+  let extraClassDeclaration = [{
+    /// Get attribute alias name for this attribute.
+    std::string getAlias() const;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // AST Wrappers
 //===----------------------------------------------------------------------===//
 

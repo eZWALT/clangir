@@ -213,11 +213,25 @@ static Address buildPointerWithAlignment(const Expr *E,
     }
   }
 
+  // std::addressof and variants.
+  if (auto *Call = dyn_cast<CallExpr>(E)) {
+    switch (Call->getBuiltinCallee()) {
+    default:
+      break;
+    case Builtin::BIaddressof:
+    case Builtin::BI__addressof:
+    case Builtin::BI__builtin_addressof: {
+      llvm_unreachable("NYI");
+    }
+    }
+  }
+
   // TODO: conditional operators, comma.
+
   // Otherwise, use the alignment of the type.
-  CharUnits Align =
-      CGF.CGM.getNaturalPointeeTypeAlignment(E->getType(), BaseInfo);
-  return Address(CGF.buildScalarExpr(E), Align);
+  return CGF.makeNaturalAddressForPointer(
+      CGF.buildScalarExpr(E), E->getType()->getPointeeType(), CharUnits(),
+      /*ForPointeeType=*/true, BaseInfo, IsKnownNonNull);
 }
 
 /// Helper method to check if the underlying ABI is AAPCS
@@ -2659,7 +2673,9 @@ Address CIRGenFunction::CreateTempAlloca(mlir::Type Ty, CharUnits Align,
   // be different from the type defined by the language. For example,
   // in C++ the auto variables are in the default address space. Therefore
   // cast alloca to the default address space when necessary.
-  assert(!UnimplementedFeature::getASTAllocaAddressSpace());
+  if (getASTAllocaAddressSpace() != LangAS::Default) {
+    llvm_unreachable("Requires address space cast which is NYI");
+  }
   return Address(V, Ty, Align);
 }
 

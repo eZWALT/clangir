@@ -30,7 +30,6 @@ struct UnimplementedFeature {
   // Address space related
   static bool addressSpace() { return false; }
   static bool addressSpaceInGlobalVar() { return false; }
-  static bool getASTAllocaAddressSpace() { return false; }
 
   // Clang codegen options
   static bool strictVTablePointers() { return false; }
@@ -65,6 +64,7 @@ struct UnimplementedFeature {
   static bool generateDebugInfo() { return false; }
 
   // LLVM Attributes
+  static bool setFunctionAttributes() { return false; }
   static bool attributeBuiltin() { return false; }
   static bool attributeNoBuiltin() { return false; }
   static bool parameterAttributes() { return false; }

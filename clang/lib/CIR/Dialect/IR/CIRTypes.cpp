@@ -127,9 +127,9 @@ void BoolType::print(mlir::AsmPrinter &printer) const {}
 ///
 /// Recurses into union members never returning a union as the largest member.
 Type StructType::getLargestMember(const ::mlir::DataLayout &dataLayout) const {
-  if (!largestMember)
+  if (!layoutInfo)
     computeSizeAndAlignment(dataLayout);
-  return largestMember;
+  return layoutInfo.cast<mlir::cir::StructLayoutAttr>().getLargestMember();
 }
 
 Type StructType::parse(mlir::AsmParser &parser) {
@@ -472,17 +472,18 @@ uint64_t mlir::cir::VectorType::getPreferredAlignment(
 llvm::TypeSize
 StructType::getTypeSizeInBits(const ::mlir::DataLayout &dataLayout,
                               ::mlir::DataLayoutEntryListRef params) const {
-  if (!size)
+  if (!layoutInfo)
     computeSizeAndAlignment(dataLayout);
-  return llvm::TypeSize::getFixed(*size * 8);
+  return llvm::TypeSize::getFixed(
+      layoutInfo.cast<mlir::cir::StructLayoutAttr>().getSize() * 8);
 }
 
 uint64_t
 StructType::getABIAlignment(const ::mlir::DataLayout &dataLayout,
                             ::mlir::DataLayoutEntryListRef params) const {
-  if (!align)
+  if (!layoutInfo)
     computeSizeAndAlignment(dataLayout);
-  return *align;
+  return layoutInfo.cast<mlir::cir::StructLayoutAttr>().getAlignment();
 }
 
 uint64_t
@@ -492,27 +493,40 @@ StructType::getPreferredAlignment(const ::mlir::DataLayout &dataLayout,
 }
 
 bool StructType::isPadded(const ::mlir::DataLayout &dataLayout) const {
-  if (!padded)
+  if (!layoutInfo)
     computeSizeAndAlignment(dataLayout);
-  return *padded;
+  return layoutInfo.cast<mlir::cir::StructLayoutAttr>().getPadded();
+}
+
+uint64_t StructType::getElementOffset(const ::mlir::DataLayout &dataLayout,
+                                      unsigned idx) const {
+  assert(idx < getMembers().size() && "access not valid");
+  if (!layoutInfo)
+    computeSizeAndAlignment(dataLayout);
+  auto offsets = layoutInfo.cast<mlir::cir::StructLayoutAttr>().getOffsets();
+  auto intAttr = offsets[idx].cast<mlir::IntegerAttr>();
+  return intAttr.getInt();
 }
 
 void StructType::computeSizeAndAlignment(
     const ::mlir::DataLayout &dataLayout) const {
   assert(isComplete() && "Cannot get layout of incomplete structs");
   // Do not recompute.
-  if (size || align || padded || largestMember)
+  if (layoutInfo)
     return;
 
   // This is a similar algorithm to LLVM's StructLayout.
   unsigned structSize = 0;
   llvm::Align structAlignment{1};
-  [[maybe_unused]] bool isPadded = false;
+  bool isPadded = false;
   unsigned numElements = getNumElements();
   auto members = getMembers();
+  mlir::Type largestMember;
   unsigned largestMemberSize = 0;
+  SmallVector<mlir::Attribute, 4> memberOffsets;
 
   // Loop over each of the elements, placing them in memory.
+  memberOffsets.reserve(numElements);
   for (unsigned i = 0, e = numElements; i != e; ++i) {
     auto ty = members[i];
 
@@ -542,8 +556,9 @@ void StructType::computeSizeAndAlignment(
     // Keep track of maximum alignment constraint.
     structAlignment = std::max(tyAlign, structAlignment);
 
-    // FIXME: track struct size up to each element.
-    // getMemberOffsets()[i] = structSize;
+    // Struct size up to each element is the element offset.
+    memberOffsets.push_back(mlir::IntegerAttr::get(
+        mlir::IntegerType::get(getContext(), 32), structSize));
 
     // Consume space for this data item
     structSize += dataLayout.getTypeSize(ty);
@@ -551,22 +566,21 @@ void StructType::computeSizeAndAlignment(
 
   // For unions, the size and aligment is that of the largest element.
   if (isUnion()) {
-    size = largestMemberSize;
-    align = structAlignment.value();
-    padded = false;
-    return;
+    structSize = largestMemberSize;
+    isPadded = false;
+  } else {
+    // Add padding to the end of the struct so that it could be put in an array
+    // and all array elements would be aligned correctly.
+    if (!llvm::isAligned(structAlignment, structSize)) {
+      isPadded = true;
+      structSize = llvm::alignTo(structSize, structAlignment);
+    }
   }
 
-  // Add padding to the end of the struct so that it could be put in an array
-  // and all array elements would be aligned correctly.
-  if (!llvm::isAligned(structAlignment, structSize)) {
-    isPadded = true;
-    structSize = llvm::alignTo(structSize, structAlignment);
-  }
-
-  size = structSize;
-  align = structAlignment.value();
-  padded = isPadded;
+  auto offsets = mlir::ArrayAttr::get(getContext(), memberOffsets);
+  layoutInfo = mlir::cir::StructLayoutAttr::get(
+      getContext(), structSize, structAlignment.value(), isPadded,
+      largestMember, offsets);
 }
 
 //===----------------------------------------------------------------------===//
@@ -693,6 +707,67 @@ uint64_t
 DoubleType::getPreferredAlignment(const ::mlir::DataLayout &dataLayout,
                                   ::mlir::DataLayoutEntryListRef params) const {
   return (uint64_t)(getWidth() / 8);
+}
+
+const llvm::fltSemantics &FP80Type::getFloatSemantics() const {
+  return llvm::APFloat::x87DoubleExtended();
+}
+
+llvm::TypeSize
+FP80Type::getTypeSizeInBits(const mlir::DataLayout &dataLayout,
+                            mlir::DataLayoutEntryListRef params) const {
+  return llvm::TypeSize::getFixed(16);
+}
+
+uint64_t FP80Type::getABIAlignment(const mlir::DataLayout &dataLayout,
+                                   mlir::DataLayoutEntryListRef params) const {
+  return 16;
+}
+
+uint64_t
+FP80Type::getPreferredAlignment(const ::mlir::DataLayout &dataLayout,
+                                ::mlir::DataLayoutEntryListRef params) const {
+  return 16;
+}
+
+const llvm::fltSemantics &LongDoubleType::getFloatSemantics() const {
+  return getUnderlying()
+      .cast<mlir::cir::CIRFPTypeInterface>()
+      .getFloatSemantics();
+}
+
+llvm::TypeSize
+LongDoubleType::getTypeSizeInBits(const mlir::DataLayout &dataLayout,
+                                  mlir::DataLayoutEntryListRef params) const {
+  return getUnderlying()
+      .cast<mlir::DataLayoutTypeInterface>()
+      .getTypeSizeInBits(dataLayout, params);
+}
+
+uint64_t
+LongDoubleType::getABIAlignment(const mlir::DataLayout &dataLayout,
+                                mlir::DataLayoutEntryListRef params) const {
+  return getUnderlying().cast<mlir::DataLayoutTypeInterface>().getABIAlignment(
+      dataLayout, params);
+}
+
+uint64_t LongDoubleType::getPreferredAlignment(
+    const ::mlir::DataLayout &dataLayout,
+    mlir::DataLayoutEntryListRef params) const {
+  return getUnderlying()
+      .cast<mlir::DataLayoutTypeInterface>()
+      .getPreferredAlignment(dataLayout, params);
+}
+
+LogicalResult
+LongDoubleType::verify(function_ref<InFlightDiagnostic()> emitError,
+                       mlir::Type underlying) {
+  if (!underlying.isa<DoubleType, FP80Type>()) {
+    emitError() << "invalid underlying type for long double";
+    return failure();
+  }
+
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

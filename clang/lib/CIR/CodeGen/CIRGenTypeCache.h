@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_LIB_CIR_CODEGENTYPECACHE_H
 #define LLVM_CLANG_LIB_CIR_CODEGENTYPECACHE_H
 
+#include "UnimplementedFeatureGuarding.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "clang/AST/CharUnits.h"
@@ -39,6 +40,7 @@ struct CIRGenTypeCache {
   // cir.long_double type. Said type would also hold the semantics for lowering.
   mlir::cir::SingleType FloatTy;
   mlir::cir::DoubleType DoubleTy;
+  mlir::cir::FP80Type FP80Ty;
 
   /// int
   mlir::Type UIntTy;
@@ -107,7 +109,7 @@ struct CIRGenTypeCache {
   //     unsigned char SizeAlignInBytes;
   //   };
 
-  //   clang::LangAS ASTAllocaAddressSpace;
+  clang::LangAS ASTAllocaAddressSpace;
 
   //   clang::CharUnits getSizeSize() const {
   //     return clang::CharUnits::fromQuantity(SizeSizeInBytes);
@@ -122,9 +124,14 @@ struct CIRGenTypeCache {
     return clang::CharUnits::fromQuantity(PointerAlignInBytes);
   }
 
-  //   clang::LangAS getASTAllocaAddressSpace() const {
-  //     return ASTAllocaAddressSpace;
-  //   }
+  clang::LangAS getASTAllocaAddressSpace() const {
+    // Address spaces are not yet fully supported, but the usage of the default
+    // alloca address space can be used for now only for comparison with the
+    // default address space.
+    assert(!UnimplementedFeature::addressSpace());
+    assert(ASTAllocaAddressSpace == clang::LangAS::Default);
+    return ASTAllocaAddressSpace;
+  }
 };
 
 } // namespace cir

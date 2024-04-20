@@ -165,6 +165,18 @@ LogicalResult ConstStructAttr::verify(
   return success();
 }
 
+LogicalResult StructLayoutAttr::verify(
+    ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, unsigned size,
+    unsigned alignment, bool padded, mlir::Type largest_member,
+    mlir::ArrayAttr offsets) {
+  if (not std::all_of(offsets.begin(), offsets.end(), [](mlir::Attribute attr) {
+        return attr.isa<mlir::IntegerAttr>();
+      })) {
+    return emitError() << "all index values must be integers";
+  }
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // LangAttr definitions
 //===----------------------------------------------------------------------===//
@@ -440,6 +452,54 @@ DataMemberAttr::verify(function_ref<InFlightDiagnostic()> emitError,
   if (memberTy != ty.getMemberTy()) {
     emitError() << "member type of a #cir.data_member attribute must match the "
                    "attribute type";
+    return failure();
+  }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// DynamicCastInfoAtttr definitions
+//===----------------------------------------------------------------------===//
+
+std::string DynamicCastInfoAttr::getAlias() const {
+  // The alias looks like: `dyn_cast_info_<src>_<dest>`
+
+  std::string alias = "dyn_cast_info_";
+
+  alias.append(getSrcRtti().getSymbol().getValue());
+  alias.push_back('_');
+  alias.append(getDestRtti().getSymbol().getValue());
+
+  return alias;
+}
+
+LogicalResult DynamicCastInfoAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError,
+    mlir::cir::GlobalViewAttr srcRtti, mlir::cir::GlobalViewAttr destRtti,
+    mlir::FlatSymbolRefAttr runtimeFunc, mlir::FlatSymbolRefAttr badCastFunc,
+    mlir::cir::IntAttr offsetHint) {
+  auto isRttiPtr = [](mlir::Type ty) {
+    // RTTI pointers are !cir.ptr<!u8i>.
+
+    auto ptrTy = ty.dyn_cast<mlir::cir::PointerType>();
+    if (!ptrTy)
+      return false;
+
+    auto pointeeIntTy = ptrTy.getPointee().dyn_cast<mlir::cir::IntType>();
+    if (!pointeeIntTy)
+      return false;
+
+    return pointeeIntTy.isUnsigned() && pointeeIntTy.getWidth() == 8;
+  };
+
+  if (!isRttiPtr(srcRtti.getType())) {
+    emitError() << "srcRtti must be an RTTI pointer";
+    return failure();
+  }
+
+  if (!isRttiPtr(destRtti.getType())) {
+    emitError() << "destRtti must be an RTTI pointer";
     return failure();
   }
 
