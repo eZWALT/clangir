@@ -27,7 +27,8 @@
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/TargetInfo.h"
-#include <mlir/Support/LogicalResult.h>
+#include <clang/AST/ASTFwd.h>
+#include <clang/Basic/OpenMPKinds.h>
 
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
@@ -998,6 +999,12 @@ public:
   mlir::LogicalResult
   buildOMPTaskyieldDirective(const OMPTaskyieldDirective &S);
   mlir::LogicalResult buildOMPBarrierDirective(const OMPBarrierDirective &S);
+  mlir::LogicalResult buildOMPTaskDirective(const OMPTaskDirective &S);
+
+  template <typename OmpOp>
+  mlir::LogicalResult
+  buildCapturedStatement(OmpOp &operation, const OMPExecutableDirective &S,
+                         OpenMPDirectiveKind DKind, bool useCurrentScope);
 
   LValue buildOpaqueValueLValue(const OpaqueValueExpr *e);
 
@@ -1412,19 +1419,6 @@ public:
 
   LValue MakeNaturalAlignPointeeAddrLValue(mlir::Value V, clang::QualType T);
   LValue MakeNaturalAlignAddrLValue(mlir::Value V, QualType T);
-
-  /// Construct an address with the natural alignment of T. If a pointer to T
-  /// is expected to be signed, the pointer passed to this function must have
-  /// been signed, and the returned Address will have the pointer authentication
-  /// information needed to authenticate the signed pointer.
-  Address makeNaturalAddressForPointer(
-      mlir::Value Ptr, QualType T, CharUnits Alignment = CharUnits::Zero(),
-      bool ForPointeeType = false, LValueBaseInfo *BaseInfo = nullptr,
-      KnownNonNull_t IsKnownNonNull = NotKnownNonNull) {
-    if (Alignment.isZero())
-      Alignment = CGM.getNaturalTypeAlignment(T, BaseInfo, ForPointeeType);
-    return Address(Ptr, convertTypeForMem(T), Alignment, IsKnownNonNull);
-  }
 
   /// Load the value for 'this'. This function is only valid while generating
   /// code for an C++ member function.

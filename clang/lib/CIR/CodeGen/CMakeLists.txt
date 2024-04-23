@@ -1,3 +1,4 @@
+
 set(
   LLVM_LINK_COMPONENTS
   Core
@@ -8,6 +9,7 @@ get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
 add_clang_library(clangCIR
   CIRAsm.cpp
+  CIRClauseProcessor.cpp
   CIRGenAtomic.cpp
   CIRGenBuiltin.cpp
   CIRGenCXX.cpp
