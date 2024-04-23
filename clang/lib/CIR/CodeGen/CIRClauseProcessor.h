@@ -28,13 +28,11 @@
 #include "clang/Basic/OpenMPKinds.h"
 #include <clang/AST/ASTFwd.h>
 
-
-#include <mlir/IR/Location.h>
-#include <mlir/IR/BuiltinAttributes.h>
-#include <mlir/IR/BuiltinOps.h>
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Value.h"
-
+#include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/BuiltinOps.h>
+#include <mlir/IR/Location.h>
 
 class CIRClauseProcessor {
 
