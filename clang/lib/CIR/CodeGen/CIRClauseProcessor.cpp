@@ -17,103 +17,86 @@
 //===----------------------------------------------------------------------===//
 
 #include "CIRClauseProcessor.h"
-#include <mlir/IR/BuiltinAttributes.h>
+#include "CIRGenOpenMPRuntime.h"
+#include <mlir/Dialect/OpenMP/OpenMPDialect.h>
 
-bool CIRClauseProcessor::processUntied(
-    const clang::OMPExecutableDirective &dirCtx, mlir::UnitAttr &result) const {
-  bool hasUntied = dirCtx.hasClausesOfKind<OMPUntiedClause>();
-  result = hasUntied ? this->CGF.getBuilder().getUnitAttr() : nullptr;
-  return hasUntied;
+bool CIRClauseProcessor::processUntied(mlir::UnitAttr &result) const 
+{
+  markClauseOccurrence<clang::OMPUntiedClause>(result);
 }
 
-bool CIRClauseProcessor::processMergeable(
-    const clang::OMPExecutableDirective &dirCtx, mlir::UnitAttr &result) const {
-  bool hasMergeable = dirCtx.hasClausesOfKind<OMPMergeableClause>();
-  result = hasMergeable ? this->CGF.getBuilder().getUnitAttr() : nullptr;
-  return hasMergeable;
+bool CIRClauseProcessor::processMergeable(mlir::UnitAttr &result) const
+{
+  markClauseOccurrence<clang::OMPMergeableClause>(result);
 }
 
-bool CIRClauseProcessor::processFinal(
-    const clang::OMPExecutableDirective &dirCtx, mlir::Value &result) const {
-
-  bool hasFinal = dirCtx.hasClausesOfKind<OMPFinalClause>();
-  if (hasFinal) {
-    auto builder = this->CGF.getBuilder();
-    auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
-    // getSingleClause will raise an exception if multiple identical clauses
-    // exist
-    const clang::OMPFinalClause *finalClause =
-        dirCtx.getSingleClause<OMPFinalClause>();
-    const clang::Expr *finalExpr = finalClause->getCondition();
+bool CIRClauseProcessor::processFinal(mlir::Value &result) const
+{
+  const clang::OMPFinalClause* clause = findUniqueClause<clang::OMPFinalClause>();
+  if(clause){
+    auto scopeLoc = this->CGF.getLoc(this->dirCtx.getSourceRange());
+    const clang::Expr *finalExpr = clause->getCondition();
     mlir::Value finalValue = this->CGF.evaluateExprAsBool(finalExpr);
     mlir::ValueRange finalRange(finalValue);
-
     mlir::Type int1Ty = builder.getI1Type();
     result = builder
                  .create<mlir::UnrealizedConversionCastOp>(
                      scopeLoc, /*TypeOut*/ int1Ty, /*Inputs*/ finalRange)
                  .getResult(0);
+    return true;
   }
-  return hasFinal;
+  result = NULL;
+  return false;
 }
 
-bool CIRClauseProcessor::processIf(const clang::OMPExecutableDirective &dirCtx,
-                                   mlir::Value &result) const {
-  bool hasIf = dirCtx.hasClausesOfKind<OMPIfClause>();
-  if (hasIf) {
-    auto builder = this->CGF.getBuilder();
-    auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
-    // getSingleClause will raise an exception if multiple identical clauses
-    // exist
-    const clang::OMPIfClause *ifClause = dirCtx.getSingleClause<OMPIfClause>();
-    const clang::Expr *ifExpr = ifClause->getCondition();
+bool CIRClauseProcessor::processIf(mlir::Value &result) const 
+{
+  const clang::OMPIfClause* clause = findUniqueClause<clang::OMPIfClause>();
+  if (clause) {
+    auto scopeLoc = this->CGF.getLoc(this->dirCtx.getSourceRange());
+    const clang::Expr *ifExpr = clause->getCondition();
     mlir::Value ifValue = this->CGF.evaluateExprAsBool(ifExpr);
     mlir::ValueRange ifRange(ifValue);
-
     mlir::Type int1Ty = builder.getI1Type();
     result = builder
                  .create<mlir::UnrealizedConversionCastOp>(
                      scopeLoc, /*TypeOut*/ int1Ty, /*Inputs*/ ifRange)
                  .getResult(0);
+    return true;
   }
-  return hasIf;
+  result = NULL;
+  return false;
 }
 
-bool CIRClauseProcessor::processPriority(
-    const clang::OMPExecutableDirective &dirCtx, mlir::Value &result) const {
-  bool hasPriority = dirCtx.hasClausesOfKind<OMPPriorityClause>();
-  if (hasPriority) {
-    auto builder = this->CGF.getBuilder();
+bool CIRClauseProcessor::processPriority(mlir::Value &result) const {
+  const clang::OMPPriorityClause* clause = findUniqueClause<clang::OMPPriorityClause>();
+  if (clause) {
     auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
-    // getSingleClause will raise an exception if multiple identical clauses
-    // exist
-    const clang::OMPPriorityClause *priorityClause =
-        dirCtx.getSingleClause<OMPPriorityClause>();
-    const clang::Expr *priorityExpr = priorityClause->getPriority();
+    const clang::Expr *priorityExpr = clause->getPriority();
     mlir::Value priorityValue = this->CGF.buildScalarExpr(priorityExpr);
     mlir::ValueRange priorityRange(priorityValue);
-
     mlir::Type uint32Ty = builder.getI32Type();
     result = builder
                  .create<mlir::UnrealizedConversionCastOp>(
                      scopeLoc, /*TypeOut*/ uint32Ty, /*Inputs*/ priorityRange)
                  .getResult(0);
+    return true;
   }
-  return hasPriority;
+  result = NULL;
+  return false;
 }
 
 bool CIRClauseProcessor::processDepend(
-    const clang::OMPExecutableDirective &dirCtx,
-    mlir::ArrayAttr &dependTypeOperands,
-    llvm::SmallVector<mlir::Value> &dependOperands) const {
-  bool hasDepend = dirCtx.hasClausesOfKind<OMPDependClause>();
-  llvm_unreachable("Clause currently in development");
+    mlir::omp::DependClauseOps& result, cir::OMPTaskDataTy) const
+{
+  return findRepeatableClause<clang::OMPDependClause>(
+    [&](const clang::OMPDependClause* clause){
+      mlir::omp::ClauseTaskDependAttr dependType = NULL;
 
-  if (hasDepend) {
-    auto builder = this->CGF.getBuilder();
-    auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
+      const mlir::Value variable = NULL;      
+      result.dependVars.append(variable);
+      result.dependTypeAttrs.append(dependType);
+    }
+  );
 
-    // XD?
-  }
-  return hasDepend;
 }

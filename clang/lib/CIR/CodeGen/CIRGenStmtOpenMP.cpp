@@ -19,6 +19,7 @@
 #include "CIRGenFunction.h"
 #include "CIRGenOpenMPRuntime.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/OpenMPClauseOperands.h"
 #include "mlir/IR/Value.h"
 
 #include <clang/AST/ASTFwd.h>
@@ -162,18 +163,18 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
   // Create the values and attributes that will be consumed by omp.task
   mlir::UnitAttr untiedAttr, mergeableAttr;
   mlir::Value finalOperand, ifOperand, priorityOperand;
-  // TODO
-  mlir::ArrayAttr dependTypeOperands;
-  // TODO
-  llvm::SmallVector<mlir::Value> dependOperands;
+  mlir::omp::DependClauseOps dependOperands;
 
+  OMPTaskDataTy data;
+  buildDependences(S, data);
   // Evalutes clauses
-  CIRClauseProcessor cp = CIRClauseProcessor(*this);
-  cp.processUntied(S, untiedAttr);
-  cp.processMergeable(S, mergeableAttr);
-  cp.processFinal(S, finalOperand);
-  cp.processIf(S, ifOperand);
-  cp.processPriority(S, priorityOperand);
+  CIRClauseProcessor cp = CIRClauseProcessor(*this, S);
+  cp.processUntied(untiedAttr);
+  cp.processMergeable(mergeableAttr);
+  cp.processFinal(finalOperand);
+  cp.processIf(ifOperand);
+  cp.processPriority(priorityOperand);
+  cp.processDepend(dependOperands, data);
 
   // Create a `omp.task` operation
   // TODO: add support to these OpenMP v5 features
@@ -186,8 +187,8 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
       /*In Reduction variables*/ mlir::ValueRange(),
       /*optional In Reductions*/ nullptr,
       /*optional priority value*/ priorityOperand,
-      /*optional Dependency Types values*/ dependTypeOperands,
-      /*Dependencies values*/ dependOperands,
+      /*optional Dependency Types values*/ dependOperands.dependTypeAttrs,
+      /*Dependencies values*/ dependOperands.dependVars,
       /*Allocate values*/ mlir::ValueRange(),
       /*Allocator values*/ mlir::ValueRange());
   // Build the captured statement CIR region

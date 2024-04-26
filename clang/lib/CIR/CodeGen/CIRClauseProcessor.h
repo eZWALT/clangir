@@ -22,50 +22,151 @@
 #include "CIRGenFunction.h"
 #include "CIRGenModule.h"
 
-#include <llvm/ADT/SmallVector.h>
-
+#include "clang/AST/ASTFwd.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/Basic/OpenMPKinds.h"
-#include <clang/AST/ASTFwd.h>
+
+
+//#include <functional>
+//#include <list>
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+
+#include "llvm/Support/ErrorHandling.h"
+
 
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Location.h"
 #include "mlir/IR/Value.h"
-#include <mlir/IR/BuiltinAttributes.h>
-#include <mlir/IR/BuiltinOps.h>
-#include <mlir/IR/Location.h>
+
 
 class CIRClauseProcessor {
 
 private:
-  cir::CIRGenFunction &CGF;
+  cir::CIRGenFunction& CGF;
+  cir::CIRGenBuilderTy& builder;
+  const clang::OMPExecutableDirective& dirCtx;
+  std::list<clang::OMPClause*> clauses;
+  using ClauseIterator = std::list<clang::OMPClause>::const_iterator;
+
+  //Get the iterator of a clause of type C
+  template <typename C> 
+  static ClauseIterator findClause(ClauseIterator begin, ClauseIterator end) const;
+
+  //Get the first instance of a clause of type C, nullptr otherwise
+  template <typename C>
+  const C* findUniqueClause() const;
+
+  //Treat each clause according to function "callback", returns true if one or more clauses of type C are found
+  template <typename C> 
+  bool findRepeatableClause(std::function<void(const C&)> callback) const;
+
+  //Sets "result" attribute if the clause of type C is present 
+  template <typename C> 
+  bool markClauseOccurrence(mlir::UnitAttr& result) const;
 
 public:
-  CIRClauseProcessor(cir::CIRGenFunction &CGF) : CGF(CGF) {}
+  CIRClauseProcessor(cir::CIRGenFunction &CGF,
+                     const clang::OMPExecutableDirective& dirCtx
+                     ) : CGF(CGF), dirCtx(dirCtx) 
+  {
+    unsigned int numClauses = dirCtx.getNumClauses();
+    for(const clang::OMPClause* clause: dirCtx.clauses()){
+      this->clauses.push_back(clause);
+    }
+    this->builder = this->CGF.getBuilder();
+  }
 
   // At most 1 ocurrence clauses
+  bool processIf(mlir::Value &result) const;
 
-  bool processFinal(const clang::OMPExecutableDirective &dirCtx,
-                    mlir::Value &result) const;
+  bool processFinal(mlir::Value &result) const;
 
-  bool processIf(const clang::OMPExecutableDirective &dirCtx,
-                 mlir::Value &result) const;
+  bool processPriority(mlir::Value &result) const;
 
-  bool processPriority(const clang::OMPExecutableDirective &dirCtx,
-                       mlir::Value &result) const;
+  bool processUntied(mlir::UnitAttr &result) const;
 
-  bool processUntied(const clang::OMPExecutableDirective &dirCtx,
-                     mlir::UnitAttr &result) const;
+  bool processMergeable(mlir::UnitAttr &result) const;
 
-  bool processMergeable(const clang::OMPExecutableDirective &dirCtx,
-                        mlir::UnitAttr &result) const;
+  bool processPrivate() const;
 
-  bool processDepend(const clang::OMPExecutableDirective &dirCtx,
-                     mlir::ArrayAttr &dependTypeOperands,
+  bool processFirstPrivate() const;
+  
+  // Repeatable clauses
+  bool processDepend(mlir::ArrayAttr &dependTypeOperands,
                      llvm::SmallVector<mlir::Value> &dependOperands) const;
 
-  bool processPrivate(const clang::OMPExecutableDirective &dirCtx) const;
-
-  bool processFirstPrivate(const clang::OMPExecutableDirective &dirCtx) const;
+  template <typename... Cs>
+  void processTODO() const;
 };
+
+template <typename C>
+CIRClauseProcessor::ClauseIterator CIRClauseProcessor::findClause(ClauseIterator begin, ClauseIterator end) const 
+{
+  for(ClauseIterator it = begin; it != end; ++it){
+    const clang::OMPClause* clause = *it;
+    if(dynamic_cast<C*>(clause)){
+      return it;
+    }
+  }
+  return end;
+}
+
+template <typename C>
+const C* CIRClauseProcessor::findUniqueClause() const
+{
+  ClauseIterator it = findClause<C>(clauses.begin(), clauses.end());
+  if(it != clauses.end()){
+    return *it;
+  }
+  else return nullptr;
+}
+
+template <typename C> 
+bool CIRClauseProcessor::markClauseOccurrence(mlir::UnitAttr& result) const 
+{
+  if(findUniqueClause<C>()){
+    result = this->CGF.getBuilder().getUnitAttr();
+    return true;
+  }
+  result = NULL;
+  return false;
+}
+
+template <typename C> 
+bool CIRClauseProcessor::findRepeatableClause(std::function<void(const C*)> callback) const 
+{
+  bool found = false;
+  ClauseIterator next, end = clauses.end();
+  for(ClauseIterator it = clauses.begin(); it != end; it = next){
+    next = findClause<C>(it, end);
+
+    if(next != end){
+      callback(*next);
+      found = true;
+      ++next;
+    }
+  }
+  return found;
+}
+
+template<typename... Cs>
+CIRClauseProcessor::processTODO() const 
+{
+  auto checkClause = [&](const clang::OMPClause* clause){
+    if(clause){
+      llvm_unreachable("Clause NYI");
+    }
+    else return;
+  }
+
+  for(ClauseIterator it = clauses.begin; it != clauses.end(); ++it){
+    checkClause(std::get_if<Cs>(*it));
+  }
+}
+
+
 
 #endif
