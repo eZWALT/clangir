@@ -14,6 +14,8 @@
 #define LLVM_CLANG_LIB_CIR_CODEGEN_CIRGENOPENMPRUNTIME_H
 
 #include "CIRGenValue.h"
+#include "CIRGenBuilder.h"
+
 #include "clang/AST/Redeclarable.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
@@ -45,6 +47,7 @@ struct OMPTaskDataTy final {
   };
   llvm::SmallVector<DependData, 4> Dependences;
   bool HasNowaitClause = false;
+  bool Tied = false;
 };
 
 class CIRGenOpenMPRuntime {
@@ -93,6 +96,8 @@ public:
   virtual void emitTaskWaitCall(CIRGenFunction &CGF, mlir::Location Loc,
                                 const OMPTaskDataTy &Data,
                                 mlir::OpBuilder &builder);
+
+  virtual void emitTaskCall(CIRGenFunction& CGF, CIRGenBuilderTy& builder, mlir::Location Loc, const OMPTaskDataTy& Data);
 
 protected:
   CIRGenModule &CGM;

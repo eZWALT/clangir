@@ -3170,6 +3170,7 @@ void ConvertCIRToLLVMPass::runOnOperation() {
 
   // Allow operations that will be lowered directly to LLVM IR.
   target.addLegalOp<mlir::cir::ZeroInitConstOp>();
+  target.addLegalOp<mlir::UnrealizedConversionCastOp>();
 
   getOperation()->removeAttr("cir.sob");
   getOperation()->removeAttr("cir.lang");

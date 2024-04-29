@@ -18,9 +18,6 @@
 #include "CIRClauseProcessor.h"
 #include "CIRGenFunction.h"
 #include "CIRGenOpenMPRuntime.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
-#include "mlir/Dialect/OpenMP/OpenMPClauseOperands.h"
-#include "mlir/IR/Value.h"
 
 #include <clang/AST/ASTFwd.h>
 #include <clang/AST/StmtOpenMP.h>
@@ -28,6 +25,9 @@
 #include <cstdint>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/OpenMPClauseOperands.h"
+#include "mlir/IR/Value.h"
 #include <mlir/IR/Attributes.h>
 #include <mlir/IR/BuiltinAttributeInterfaces.h>
 #include <mlir/IR/BuiltinAttributes.h>
@@ -160,13 +160,27 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
   mlir::LogicalResult res = mlir::success();
   auto scopeLoc = getLoc(S.getSourceRange());
 
+  OMPTaskDataTy data;
+  data.Tied = not S.getSingleClause<clang::OMPUntiedClause>();
+
+  //EMIT BODYGEN FUNCTION &&
+
+  //EMIT TASKGEN FUNCTION &&
+
+  //RUN TASKBASEDDIRECTIVE OpenMPruntime which calls emitTaskCall
+
+  //CGM.getOpenMPRuntime().emitTaskCall(/*CGF*/this, /*Location*/scopeLoc, /*Data*/data);
+
+
   // Create the values and attributes that will be consumed by omp.task
-  mlir::UnitAttr untiedAttr, mergeableAttr;
-  mlir::Value finalOperand, ifOperand, priorityOperand;
+  mlir::omp::TaskClauseOps clauseOps;
+  mlir::omp::UntiedClauseOps untiedAttr;
+  mlir::omp::MergeableClauseOps  mergeableAttr;
+  mlir::omp::FinalClauseOps finalOperand;
+  mlir::omp::IfClauseOps ifOperand;
+  mlir::omp::PriorityClauseOps priorityOperand;
   mlir::omp::DependClauseOps dependOperands;
 
-  OMPTaskDataTy data;
-  buildDependences(S, data);
   // Evalutes clauses
   CIRClauseProcessor cp = CIRClauseProcessor(*this, S);
   cp.processUntied(untiedAttr);
@@ -175,18 +189,22 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
   cp.processIf(ifOperand);
   cp.processPriority(priorityOperand);
   cp.processDepend(dependOperands, data);
+  //TODO(cir) Give support to this clauses 
+  cp.processTODO<clang::OMPAllocateClause, clang::OMPInReductionClause,
+                 clang::OMPAffinityClause, clang::OMPDetachClause,
+                 clang::OMPDefaultClause>();
 
   // Create a `omp.task` operation
   // TODO: add support to these OpenMP v5 features
   mlir::omp::TaskOp taskOp = builder.create<mlir::omp::TaskOp>(
       /*Location*/ scopeLoc,
-      /*optional If value*/ ifOperand,
-      /*optional Final value*/ finalOperand,
-      /*optional Untied attribute*/ untiedAttr,
-      /*optional Mergeable attribute*/ mergeableAttr,
+      /*optional If value*/ ifOperand.ifVar,
+      /*optional Final value*/ finalOperand.finalVar,
+      /*optional Untied attribute*/ untiedAttr.untiedAttr,
+      /*optional Mergeable attribute*/ mergeableAttr.mergeableAttr,
       /*In Reduction variables*/ mlir::ValueRange(),
       /*optional In Reductions*/ nullptr,
-      /*optional priority value*/ priorityOperand,
+      /*optional priority value*/ priorityOperand.priorityVar,
       /*optional Dependency Types values*/ dependOperands.dependTypeAttrs,
       /*Dependencies values*/ dependOperands.dependVars,
       /*Allocate values*/ mlir::ValueRange(),

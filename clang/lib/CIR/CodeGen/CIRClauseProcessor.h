@@ -21,6 +21,7 @@
 #include "CIRGenBuilder.h"
 #include "CIRGenFunction.h"
 #include "CIRGenModule.h"
+#include "CIRGenOpenMPRuntime.h"
 
 #include "clang/AST/ASTFwd.h"
 #include "clang/AST/StmtOpenMP.h"
@@ -28,14 +29,15 @@
 
 
 //#include <functional>
-//#include <list>
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
 #include "llvm/Support/ErrorHandling.h"
-
+#include <list>
+#include <variant>
 
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/OpenMPClauseOperands.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Location.h"
@@ -48,12 +50,12 @@ private:
   cir::CIRGenFunction& CGF;
   cir::CIRGenBuilderTy& builder;
   const clang::OMPExecutableDirective& dirCtx;
-  std::list<clang::OMPClause*> clauses;
-  using ClauseIterator = std::list<clang::OMPClause>::const_iterator;
+  std::list<const clang::OMPClause*> clauses;
+  using ClauseIterator = std::list<const clang::OMPClause*>::const_iterator;
 
   //Get the iterator of a clause of type C
   template <typename C> 
-  static ClauseIterator findClause(ClauseIterator begin, ClauseIterator end) const;
+  static ClauseIterator findClause(ClauseIterator begin, ClauseIterator end);
 
   //Get the first instance of a clause of type C, nullptr otherwise
   template <typename C>
@@ -70,40 +72,33 @@ private:
 public:
   CIRClauseProcessor(cir::CIRGenFunction &CGF,
                      const clang::OMPExecutableDirective& dirCtx
-                     ) : CGF(CGF), dirCtx(dirCtx) 
+                     ) : CGF(CGF), builder(this->CGF.getBuilder()), dirCtx(dirCtx), clauses(std::list<const clang::OMPClause*>())
   {
-    unsigned int numClauses = dirCtx.getNumClauses();
     for(const clang::OMPClause* clause: dirCtx.clauses()){
       this->clauses.push_back(clause);
     }
-    this->builder = this->CGF.getBuilder();
   }
 
   // At most 1 ocurrence clauses
-  bool processIf(mlir::Value &result) const;
+  bool processIf(mlir::omp::IfClauseOps& result) const;
 
-  bool processFinal(mlir::Value &result) const;
+  bool processFinal(mlir::omp::FinalClauseOps& result) const;
 
-  bool processPriority(mlir::Value &result) const;
+  bool processPriority(mlir::omp::PriorityClauseOps& result) const;
 
-  bool processUntied(mlir::UnitAttr &result) const;
+  bool processUntied(mlir::omp::UntiedClauseOps& result) const;
 
-  bool processMergeable(mlir::UnitAttr &result) const;
-
-  bool processPrivate() const;
-
-  bool processFirstPrivate() const;
+  bool processMergeable(mlir::omp::MergeableClauseOps& result) const;
   
   // Repeatable clauses
-  bool processDepend(mlir::ArrayAttr &dependTypeOperands,
-                     llvm::SmallVector<mlir::Value> &dependOperands) const;
+  bool processDepend(mlir::omp::DependClauseOps& result, cir::OMPTaskDataTy& data) const;
 
   template <typename... Cs>
   void processTODO() const;
 };
 
 template <typename C>
-CIRClauseProcessor::ClauseIterator CIRClauseProcessor::findClause(ClauseIterator begin, ClauseIterator end) const 
+CIRClauseProcessor::ClauseIterator CIRClauseProcessor::findClause(ClauseIterator begin, ClauseIterator end) 
 {
   for(ClauseIterator it = begin; it != end; ++it){
     const clang::OMPClause* clause = *it;
@@ -131,12 +126,11 @@ bool CIRClauseProcessor::markClauseOccurrence(mlir::UnitAttr& result) const
     result = this->CGF.getBuilder().getUnitAttr();
     return true;
   }
-  result = NULL;
   return false;
 }
 
 template <typename C> 
-bool CIRClauseProcessor::findRepeatableClause(std::function<void(const C*)> callback) const 
+bool CIRClauseProcessor::findRepeatableClause(std::function<void(const C&)> callback) const 
 {
   bool found = false;
   ClauseIterator next, end = clauses.end();
@@ -153,17 +147,17 @@ bool CIRClauseProcessor::findRepeatableClause(std::function<void(const C*)> call
 }
 
 template<typename... Cs>
-CIRClauseProcessor::processTODO() const 
+void CIRClauseProcessor::processTODO() const 
 {
   auto checkClause = [&](const clang::OMPClause* clause){
     if(clause){
       llvm_unreachable("Clause NYI");
     }
     else return;
-  }
+  };
 
-  for(ClauseIterator it = clauses.begin; it != clauses.end(); ++it){
-    checkClause(std::get_if<Cs>(*it));
+  for(ClauseIterator it = clauses.begin(); it != clauses.end(); ++it){
+    (checkClause(std::get_if<Cs>(*it)), ...);
   }
 }
 

@@ -62,3 +62,7 @@ void CIRGenOpenMPRuntime::emitTaskWaitCall(CIRGenFunction &CGF,
   // This could change in the near future when OpenMP 5.0 gets supported by MLIR
   builder.create<mlir::omp::TaskwaitOp>(Loc);
 }
+
+void CIRGenOpenMPRuntime::emitTaskCall(cir::CIRGenFunction& CGF, cir::CIRGenBuilderTy& builder, mlir::Location Loc, const cir::OMPTaskDataTy& Data){
+
+}

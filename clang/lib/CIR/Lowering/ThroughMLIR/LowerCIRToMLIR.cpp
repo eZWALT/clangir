@@ -41,6 +41,7 @@
 #include "clang/CIR/Passes.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include <mlir/IR/BuiltinOps.h>
 
 using namespace cir;
 using namespace llvm;
@@ -664,6 +665,7 @@ void ConvertCIRToMLIRPass::runOnOperation() {
 
   mlir::ConversionTarget target(getContext());
   target.addLegalOp<mlir::ModuleOp>();
+  target.addLegalOp<mlir::UnrealizedConversionCastOp>();
   target.addLegalDialect<mlir::affine::AffineDialect, mlir::arith::ArithDialect,
                          mlir::memref::MemRefDialect, mlir::func::FuncDialect,
                          mlir::scf::SCFDialect, mlir::cf::ControlFlowDialect>();
