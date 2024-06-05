@@ -63,6 +63,9 @@ void CIRGenOpenMPRuntime::emitTaskWaitCall(CIRGenFunction &CGF,
   builder.create<mlir::omp::TaskwaitOp>(Loc);
 }
 
-void CIRGenOpenMPRuntime::emitTaskCall(cir::CIRGenFunction& CGF, cir::CIRGenBuilderTy& builder, mlir::Location Loc, const cir::OMPTaskDataTy& Data){
+void CIRGenOpenMPRuntime::emitTaskCall(CIRGenFunction &CGF, mlir::Location Loc,
+                                       const cir::OMPTaskDataTy &Data) {}
 
-}
+void CIRGenOpenMPRuntime::emitOMPTaskBasedDirective(
+    cir::CIRGenFunction &CGF, mlir::Location Loc,
+    clang::OpenMPDirectiveKind DKind, const cir::OMPTaskDataTy &Data) {}

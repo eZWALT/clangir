@@ -10,7 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <clang/AST/Stmt.h>
 #include <clang/AST/StmtIterator.h>
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/ErrorHandling.h>
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/Location.h>
 #include <mlir/Support/LogicalResult.h>
@@ -25,8 +28,8 @@
 #include <cstdint>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/OpenMP/OpenMPClauseOperands.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Value.h"
 #include <mlir/IR/Attributes.h>
 #include <mlir/IR/BuiltinAttributeInterfaces.h>
@@ -73,11 +76,19 @@ static void buildDependences(const OMPExecutableDirective &S,
 
 // Operation to create the captured statement of any OpenMP directive
 template <typename OmpOp>
-mlir::LogicalResult CIRGenFunction::buildCapturedStatement(
+mlir::LogicalResult CIRGenFunction::buildOMPCapturedStatement(
     OmpOp &operation, const OMPExecutableDirective &S,
     OpenMPDirectiveKind DKind, bool useCurrentScope) {
   mlir::Location scopeLoc = getLoc(S.getSourceRange());
-  const Stmt *capturedStmt = S.getCapturedStmt(DKind)->getCapturedStmt();
+
+  const Stmt *capturedStmt;
+
+  if (DKind == clang::OpenMPDirectiveKind::OMPD_taskgroup) {
+    auto x = (llvm::dyn_cast<const clang::CapturedStmt>(S.getAssociatedStmt()));
+    capturedStmt = x->getCapturedStmt();
+  } else
+    capturedStmt = S.getCapturedStmt(DKind)->getCapturedStmt();
+
   mlir::LogicalResult res = mlir::success();
   mlir::Block &block = operation.getRegion().emplaceBlock();
   mlir::OpBuilder::InsertionGuard guardCase(builder);
@@ -94,6 +105,9 @@ mlir::LogicalResult CIRGenFunction::buildCapturedStatement(
   builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
   return res;
 }
+
+// mlir::LogicalResult CIRGenFunction::buildOMPLoopBody(){return
+// mlir::success();}
 
 mlir::LogicalResult
 CIRGenFunction::buildOMPParallelDirective(const OMPParallelDirective &S) {
@@ -154,6 +168,91 @@ CIRGenFunction::buildOMPBarrierDirective(const OMPBarrierDirective &S) {
   return res;
 }
 
+mlir::LogicalResult
+CIRGenFunction::buildOMPTaskgroupDirective(const OMPTaskgroupDirective &S) {
+  mlir::LogicalResult res = mlir::success();
+  auto scopeLoc = getLoc(S.getSourceRange());
+  bool useCurrentScope = true;
+  mlir::omp::TaskgroupClauseOps clauseOps;
+
+  CIRClauseProcessor cp = CIRClauseProcessor(*this, S);
+  cp.processTODO<clang::OMPTaskReductionClause, clang::OMPAllocateClause>();
+
+  mlir::omp::TaskgroupOp taskgroupOp =
+      builder.create<mlir::omp::TaskgroupOp>(scopeLoc, clauseOps);
+  const Stmt *capturedStmt = S.getInnermostCapturedStmt()->getCapturedStmt();
+
+  mlir::Block &block = taskgroupOp.getRegion().emplaceBlock();
+  mlir::OpBuilder::InsertionGuard guardCase(builder);
+  builder.setInsertionPointToEnd(&block);
+
+  // Create a scope for the OpenMP region.
+  builder.create<mlir::cir::ScopeOp>(
+      scopeLoc, /*scopeBuilder=*/
+      [&](mlir::OpBuilder &b, mlir::Location loc) {
+        LexicalScope lexScope{*this, scopeLoc, builder.getInsertionBlock()};
+        // Emit the body of the region.
+        if (buildStmt(capturedStmt, useCurrentScope).failed())
+          res = mlir::failure();
+      });
+  builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
+  return res;
+}
+
+mlir::LogicalResult
+CIRGenFunction::buildOMPCriticalDirective(const OMPCriticalDirective &S) {
+  mlir::LogicalResult res = mlir::success();
+  auto scopeLoc = getLoc(S.getSourceRange());
+  // WIP: named critical regions still not supported
+  mlir::FlatSymbolRefAttr refAttr;
+
+  mlir::omp::CriticalOp criticalOp =
+      builder.create<mlir::omp::CriticalOp>(scopeLoc, refAttr);
+  const Stmt *capturedStmt = S.getAssociatedStmt();
+  // if(!capturedStmt) return mlir::failure();
+  mlir::Block &block = criticalOp.getRegion().emplaceBlock();
+  mlir::OpBuilder::InsertionGuard guardCase(builder);
+  builder.setInsertionPointToEnd(&block);
+
+  // Build an scope for the critical region
+  builder.create<mlir::cir::ScopeOp>(
+      scopeLoc, /*scopeBuilder=*/
+      [&](mlir::OpBuilder &b, mlir::Location loc) {
+        LexicalScope lexScope{*this, scopeLoc, builder.getInsertionBlock()};
+        // Emit the statement within the critical region
+        if (buildStmt(capturedStmt, /*useCurrentScope=*/true).failed())
+          res = mlir::failure();
+      });
+  builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
+  return res;
+}
+
+mlir::LogicalResult
+CIRGenFunction::buildOMPMasterDirective(const OMPMasterDirective &S) {
+  mlir::LogicalResult res = mlir::success();
+  auto scopeLoc = getLoc(S.getSourceRange());
+
+  mlir::omp::MasterOp masterOp = builder.create<mlir::omp::MasterOp>(scopeLoc);
+  const Stmt *capturedStmt = S.getAssociatedStmt();
+
+  // if(!capturedStmt) return mlir::failure();
+  mlir::Block &block = masterOp.getRegion().emplaceBlock();
+  mlir::OpBuilder::InsertionGuard guardCase(builder);
+  builder.setInsertionPointToEnd(&block);
+
+  // Build an scope for the critical region
+  builder.create<mlir::cir::ScopeOp>(
+      scopeLoc, /*scopeBuilder=*/
+      [&](mlir::OpBuilder &b, mlir::Location loc) {
+        LexicalScope lexScope{*this, scopeLoc, builder.getInsertionBlock()};
+        // Emit the statement within the critical region
+        if (buildStmt(capturedStmt, /*useCurrentScope=*/true).failed())
+          res = mlir::failure();
+      });
+  builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
+  return res;
+}
+
 // TODO: it should be emitted through runtime and follow Clang Skeleton
 mlir::LogicalResult
 CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
@@ -162,55 +261,46 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
 
   OMPTaskDataTy data;
   data.Tied = not S.getSingleClause<clang::OMPUntiedClause>();
-
-  //EMIT BODYGEN FUNCTION &&
-
-  //EMIT TASKGEN FUNCTION &&
-
-  //RUN TASKBASEDDIRECTIVE OpenMPruntime which calls emitTaskCall
-
-  //CGM.getOpenMPRuntime().emitTaskCall(/*CGF*/this, /*Location*/scopeLoc, /*Data*/data);
-
-
+  clang::OpenMPDirectiveKind DKind = clang::OpenMPDirectiveKind::OMPD_task;
+  bool useCurrentScope = true;
   // Create the values and attributes that will be consumed by omp.task
   mlir::omp::TaskClauseOps clauseOps;
-  mlir::omp::UntiedClauseOps untiedAttr;
-  mlir::omp::MergeableClauseOps  mergeableAttr;
-  mlir::omp::FinalClauseOps finalOperand;
-  mlir::omp::IfClauseOps ifOperand;
-  mlir::omp::PriorityClauseOps priorityOperand;
-  mlir::omp::DependClauseOps dependOperands;
-
   // Evalutes clauses
   CIRClauseProcessor cp = CIRClauseProcessor(*this, S);
-  cp.processUntied(untiedAttr);
-  cp.processMergeable(mergeableAttr);
-  cp.processFinal(finalOperand);
-  cp.processIf(ifOperand);
-  cp.processPriority(priorityOperand);
-  cp.processDepend(dependOperands, data);
-  //TODO(cir) Give support to this clauses 
+  cp.processUntied(clauseOps);
+  cp.processMergeable(clauseOps);
+  cp.processFinal(clauseOps);
+  cp.processIf(clauseOps);
+  cp.processPriority(clauseOps);
+  // cp.processDepend(clauseOps, data, scopeLoc);
+  // TODO(cir) Give support to this OpenMP v.5 clauses
   cp.processTODO<clang::OMPAllocateClause, clang::OMPInReductionClause,
                  clang::OMPAffinityClause, clang::OMPDetachClause,
                  clang::OMPDefaultClause>();
 
   // Create a `omp.task` operation
-  // TODO: add support to these OpenMP v5 features
-  mlir::omp::TaskOp taskOp = builder.create<mlir::omp::TaskOp>(
-      /*Location*/ scopeLoc,
-      /*optional If value*/ ifOperand.ifVar,
-      /*optional Final value*/ finalOperand.finalVar,
-      /*optional Untied attribute*/ untiedAttr.untiedAttr,
-      /*optional Mergeable attribute*/ mergeableAttr.mergeableAttr,
-      /*In Reduction variables*/ mlir::ValueRange(),
-      /*optional In Reductions*/ nullptr,
-      /*optional priority value*/ priorityOperand.priorityVar,
-      /*optional Dependency Types values*/ dependOperands.dependTypeAttrs,
-      /*Dependencies values*/ dependOperands.dependVars,
-      /*Allocate values*/ mlir::ValueRange(),
-      /*Allocator values*/ mlir::ValueRange());
+  mlir::omp::TaskOp taskOp =
+      builder.create<mlir::omp::TaskOp>(scopeLoc, clauseOps);
   // Build the captured statement CIR region
-  res = buildCapturedStatement(taskOp, S, OpenMPDirectiveKind::OMPD_task,
-                               /*useCurrentScope*/ true);
+  res = buildOMPCapturedStatement(taskOp, S, DKind,
+                                  /*useCurrentScope*/ useCurrentScope);
+
+  /*
+  auto &&BodyGen = [&S, &DKind, useCurrentScope](CIRGenFunction &CGF,
+  mlir::omp::TaskOp& taskOp) { return CGF.buildOMPCapturedStatement(taskOp, S,
+  DKind, useCurrentScope);
+  };
+  //EMIT TASKGEN FUNCTION &&
+  auto &&TaskGen = [&S, SharedsTy, CapturedStruct,
+                    IfCond](CIRGenFunction &CGF, llvm::Function *OutlinedFn,
+                            const OMPTaskDataTy &Data) {
+    CGF.CGM.getOpenMPRuntime().emitTaskCall(CGF, S.getBeginLoc(), S, OutlinedFn,
+                                            SharedsTy, CapturedStruct, IfCond,
+                                            Data);
+  };
+
+  */
+  // CGM.getOpenMPRuntime().emitOMPTaskBasedDirective(/*CGF*/this,
+  // /*Location*/scopeLoc, /*Data*/data);
   return res;
 }

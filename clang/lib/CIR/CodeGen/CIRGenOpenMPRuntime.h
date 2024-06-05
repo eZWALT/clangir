@@ -13,8 +13,8 @@
 #ifndef LLVM_CLANG_LIB_CIR_CODEGEN_CIRGENOPENMPRUNTIME_H
 #define LLVM_CLANG_LIB_CIR_CODEGEN_CIRGENOPENMPRUNTIME_H
 
-#include "CIRGenValue.h"
 #include "CIRGenBuilder.h"
+#include "CIRGenValue.h"
 
 #include "clang/AST/Redeclarable.h"
 #include "clang/Basic/OpenMPKinds.h"
@@ -97,7 +97,13 @@ public:
                                 const OMPTaskDataTy &Data,
                                 mlir::OpBuilder &builder);
 
-  virtual void emitTaskCall(CIRGenFunction& CGF, CIRGenBuilderTy& builder, mlir::Location Loc, const OMPTaskDataTy& Data);
+  virtual void emitTaskCall(CIRGenFunction &CGF, mlir::Location Loc,
+                            const OMPTaskDataTy &Data);
+
+  virtual void emitOMPTaskBasedDirective(CIRGenFunction &CGF,
+                                         mlir::Location Loc,
+                                         clang::OpenMPDirectiveKind DKind,
+                                         const OMPTaskDataTy &Data);
 
 protected:
   CIRGenModule &CGM;

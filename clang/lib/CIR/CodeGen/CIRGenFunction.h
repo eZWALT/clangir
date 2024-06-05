@@ -1000,11 +1000,15 @@ public:
   buildOMPTaskyieldDirective(const OMPTaskyieldDirective &S);
   mlir::LogicalResult buildOMPBarrierDirective(const OMPBarrierDirective &S);
   mlir::LogicalResult buildOMPTaskDirective(const OMPTaskDirective &S);
+  mlir::LogicalResult
+  buildOMPTaskgroupDirective(const OMPTaskgroupDirective &S);
+  mlir::LogicalResult buildOMPCriticalDirective(const OMPCriticalDirective &S);
+  mlir::LogicalResult buildOMPMasterDirective(const OMPMasterDirective &S);
 
   template <typename OmpOp>
   mlir::LogicalResult
-  buildCapturedStatement(OmpOp &operation, const OMPExecutableDirective &S,
-                         OpenMPDirectiveKind DKind, bool useCurrentScope);
+  buildOMPCapturedStatement(OmpOp &operation, const OMPExecutableDirective &S,
+                            OpenMPDirectiveKind DKind, bool useCurrentScope);
 
   LValue buildOpaqueValueLValue(const OpaqueValueExpr *e);
 
