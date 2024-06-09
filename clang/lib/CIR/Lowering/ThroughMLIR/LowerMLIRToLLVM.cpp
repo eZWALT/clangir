@@ -36,6 +36,7 @@
 #include "clang/CIR/Dialect/IR/CIRDialect.h"
 #include "clang/CIR/Passes.h"
 #include "llvm/ADT/Sequence.h"
+#include <mlir/IR/BuiltinOps.h>
 
 using namespace cir;
 using namespace llvm;
@@ -55,6 +56,7 @@ struct ConvertMLIRToLLVMPass
 void ConvertMLIRToLLVMPass::runOnOperation() {
   mlir::LLVMConversionTarget target(getContext());
   target.addLegalOp<mlir::ModuleOp>();
+  target.addLegalOp<mlir::UnrealizedConversionCastOp>();
 
   mlir::LLVMTypeConverter typeConverter(&getContext());
 

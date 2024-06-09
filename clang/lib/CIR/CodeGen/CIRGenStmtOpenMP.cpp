@@ -265,22 +265,20 @@ CIRGenFunction::buildOMPTaskDirective(const OMPTaskDirective &S) {
   bool useCurrentScope = true;
   // Create the values and attributes that will be consumed by omp.task
   mlir::omp::TaskClauseOps clauseOps;
-  // Evalutes clauses
+  
   CIRClauseProcessor cp = CIRClauseProcessor(*this, S);
   cp.processUntied(clauseOps);
   cp.processMergeable(clauseOps);
   cp.processFinal(clauseOps);
   cp.processIf(clauseOps);
   cp.processPriority(clauseOps);
-  // cp.processDepend(clauseOps, data, scopeLoc);
+  cp.processDepend(clauseOps, data, scopeLoc);
   // TODO(cir) Give support to this OpenMP v.5 clauses
-  cp.processTODO<clang::OMPAllocateClause, clang::OMPInReductionClause,
-                 clang::OMPAffinityClause, clang::OMPDetachClause,
-                 clang::OMPDefaultClause>();
+  cp.processTODO<clang::OMPAllocateClause, clang::OMPInReductionClause,clang::OMPAffinityClause, clang::OMPDetachClause,clang::OMPDefaultClause>();
 
+    
   // Create a `omp.task` operation
-  mlir::omp::TaskOp taskOp =
-      builder.create<mlir::omp::TaskOp>(scopeLoc, clauseOps);
+  mlir::omp::TaskOp taskOp = builder.create<mlir::omp::TaskOp>(scopeLoc, clauseOps);
   // Build the captured statement CIR region
   res = buildOMPCapturedStatement(taskOp, S, DKind,
                                   /*useCurrentScope*/ useCurrentScope);

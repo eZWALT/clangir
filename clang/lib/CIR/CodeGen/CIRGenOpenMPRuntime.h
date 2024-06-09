@@ -45,6 +45,8 @@ struct OMPTaskDataTy final {
                const clang::Expr *IteratorExpr)
         : DepKind(DepKind), IteratorExpr(IteratorExpr) {}
   };
+  llvm::PointerIntPair<llvm::Value *, 1, bool> Final;
+  llvm::PointerIntPair<llvm::Value *, 1, bool> Priority;
   llvm::SmallVector<DependData, 4> Dependences;
   bool HasNowaitClause = false;
   bool Tied = false;

@@ -41,6 +41,7 @@
 #include "clang/CIR/Passes.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include <mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h>
 #include <mlir/IR/BuiltinOps.h>
 
 using namespace cir;
@@ -669,6 +670,7 @@ void ConvertCIRToMLIRPass::runOnOperation() {
   target.addLegalDialect<mlir::affine::AffineDialect, mlir::arith::ArithDialect,
                          mlir::memref::MemRefDialect, mlir::func::FuncDialect,
                          mlir::scf::SCFDialect, mlir::cf::ControlFlowDialect>();
+  target.addLegalDialect<mlir::BuiltinDialect>();
   target.addIllegalDialect<mlir::cir::CIRDialect>();
 
   if (failed(applyPartialConversion(module, target, std::move(patterns))))
@@ -682,6 +684,7 @@ lowerFromCIRToMLIRToLLVMIR(mlir::ModuleOp theModule,
   mlir::PassManager pm(mlirCtx.get());
 
   pm.addPass(createConvertCIRToMLIRPass());
+  pm.addPass(mlir::createReconcileUnrealizedCastsPass());
   pm.addPass(createConvertMLIRToLLVMPass());
 
   auto result = !mlir::failed(pm.run(theModule));
@@ -714,6 +717,7 @@ mlir::ModuleOp lowerFromCIRToMLIR(mlir::ModuleOp theModule,
   mlir::PassManager pm(mlirCtx);
 
   pm.addPass(createConvertCIRToMLIRPass());
+  pm.addPass(mlir::createReconcileUnrealizedCastsPass());
 
   auto result = !mlir::failed(pm.run(theModule));
   if (!result)

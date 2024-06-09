@@ -24,6 +24,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <mlir/Dialect/OpenMP/OpenMPDialect.h>
 #include <mlir/IR/Location.h>
+#include <mlir/IR/ValueRange.h>
 
 bool CIRClauseProcessor::processUntied(
     mlir::omp::UntiedClauseOps &result) const {
@@ -174,15 +175,27 @@ bool CIRClauseProcessor::processDepend(mlir::omp::DependClauseOps &result,
              ++varIt) {
           const clang::DeclRefExpr *varRef =
               dyn_cast<clang::DeclRefExpr>(*varIt);
-          if (varRef) {
-            // Not sure at all, this produces the number not the fucking address
-            // Maybe I should use buildLValue and build
-            // mlir::Value varValue = buildScalarExpr(varRef);
-            cir::LValue capturedLvalue = this->CGF.buildLValue(varRef);
-            mlir::Value capturedValue =
-                this->CGF.buildLoadOfScalar(capturedLvalue, location);
+          // Print the DeclRefExpr details
+          llvm::errs() << "DeclRefExpr found:\n";
+          llvm::errs() << "  Type: " << varRef->getType().getAsString() << "\n";
+          auto varDecl = varRef->getDecl();
 
-            result.dependVars.push_back(capturedValue);
+          if (varRef) {
+            llvm::errs() << "VarDecl found:\n";
+            llvm::errs() << "  Name: " << varDecl->getNameAsString() << "\n";
+            llvm::errs() << "  Type: " << varDecl->getType().getAsString() << "\n";
+
+            cir::LValue capturedLvalue = this->CGF.buildLValue(varRef);
+            mlir::Value capturedValue = this->CGF.buildLoadOfScalar(capturedLvalue, location);
+            
+            llvm::errs() << "LOAD OF SCALAR: " << capturedValue << "\n";
+
+            mlir::ValueRange capturedRange(capturedValue);
+            mlir::Type uint32Ty = builder.getI32Type();
+            auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
+            mlir::Value castedValue = builder.create<mlir::UnrealizedConversionCastOp>(scopeLoc, uint32Ty, capturedRange).getResult(0);
+
+            result.dependVars.push_back(castedValue);
             result.dependTypeAttrs.push_back(dependType);
           } else {
             // Fail

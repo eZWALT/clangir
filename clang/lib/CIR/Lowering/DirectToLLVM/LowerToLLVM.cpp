@@ -11,12 +11,14 @@
 //===----------------------------------------------------------------------===//
 #include "LoweringHelpers.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
@@ -729,7 +731,7 @@ struct ConvertCIRToLLVMPass
     : public mlir::PassWrapper<ConvertCIRToLLVMPass,
                                mlir::OperationPass<mlir::ModuleOp>> {
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry.insert<mlir::BuiltinDialect, mlir::DLTIDialect,
+    registry.insert<mlir::arith::ArithDialect, mlir::DLTIDialect,
                     mlir::LLVM::LLVMDialect, mlir::func::FuncDialect>();
   }
   void runOnOperation() final;
@@ -2902,6 +2904,47 @@ class CIRIsConstantOpLowering
   }
 };
 
+class CIRUnrealizedConversionLowering: public mlir::OpConversionPattern<mlir::UnrealizedConversionCastOp> {
+  public:
+    using OpConversionPattern<mlir::UnrealizedConversionCastOp>::OpConversionPattern;
+    mlir::LogicalResult matchAndRewrite(mlir::UnrealizedConversionCastOp op, OpAdaptor adaptor, 
+                                        mlir::ConversionPatternRewriter &rewriter) const override {
+        //llvm::errs() << "Input types: " << adaptor.getInputs().getTypes() << "\n";
+        //llvm::errs() << "Output types: " << op.getOutputs().getTypes() << "\n";
+
+        // Force one-to-one casts
+        assert(op.getOutputs().getTypes().size() == 1 && "expected a single type");
+
+        auto inputType = adaptor.getInputs()[0].getType();
+        auto outputType = op.getOutputs()[0].getType();
+
+        // Ensure that the types are integer types
+        if (!inputType.isa<mlir::IntegerType>() || !outputType.isa<mlir::IntegerType>()) {
+            return mlir::failure();
+        }
+
+        auto inputIntType = inputType.cast<mlir::IntegerType>();
+        auto outputIntType = outputType.cast<mlir::IntegerType>();
+
+        // Check for bit width mismatch
+        if (inputIntType.getWidth() > outputIntType.getWidth()) {
+            // Insert TruncIOp to truncate the input to the output type
+            auto truncatedValue = rewriter.create<mlir::arith::TruncIOp>(op.getLoc(), outputType, adaptor.getInputs()[0]);
+            rewriter.replaceOp(op, truncatedValue);
+            return mlir::success();
+        } else if (inputIntType.getWidth() == outputIntType.getWidth()) {
+            // Directly replace the operation if types are the same
+            rewriter.replaceOp(op, adaptor.getInputs());
+            return mlir::success();
+        }
+
+        return mlir::failure();
+    }
+
+    //rewriter.replaceOp(op, adaptor.getOperand());
+    //return mlir::success();
+};
+
 void populateCIRToLLVMConversionPatterns(mlir::RewritePatternSet &patterns,
                                          mlir::TypeConverter &converter) {
   patterns.add<CIRReturnLowering>(patterns.getContext());
@@ -2923,7 +2966,7 @@ void populateCIRToLLVMConversionPatterns(mlir::RewritePatternSet &patterns,
       CIRVectorShuffleVecLowering, CIRStackSaveLowering,
       CIRStackRestoreLowering, CIRUnreachableLowering, CIRTrapLowering,
       CIRInlineAsmOpLowering, CIRSetBitfieldLowering, CIRGetBitfieldLowering,
-      CIRPrefetchLowering, CIRObjSizeOpLowering, CIRIsConstantOpLowering>(
+      CIRPrefetchLowering, CIRObjSizeOpLowering, CIRIsConstantOpLowering, CIRUnrealizedConversionLowering>(
       converter, patterns.getContext());
 }
 
@@ -3145,6 +3188,8 @@ void ConvertCIRToLLVMPass::runOnOperation() {
 
   populateCIRToLLVMConversionPatterns(patterns, converter);
   mlir::populateFuncToLLVMConversionPatterns(converter, patterns);
+  mlir::arith::populateArithToLLVMConversionPatterns(converter, patterns);
+
 
   mlir::ConversionTarget target(getContext());
   using namespace mlir::cir;
@@ -3165,12 +3210,11 @@ void ConvertCIRToLLVMPass::runOnOperation() {
                     >();
   // clang-format on
   target.addLegalDialect<mlir::LLVM::LLVMDialect>();
-  target.addIllegalDialect<mlir::BuiltinDialect, mlir::cir::CIRDialect,
+  target.addIllegalDialect<mlir::cir::CIRDialect,
                            mlir::func::FuncDialect>();
 
   // Allow operations that will be lowered directly to LLVM IR.
   target.addLegalOp<mlir::cir::ZeroInitConstOp>();
-  target.addLegalOp<mlir::UnrealizedConversionCastOp>();
 
   getOperation()->removeAttr("cir.sob");
   getOperation()->removeAttr("cir.lang");

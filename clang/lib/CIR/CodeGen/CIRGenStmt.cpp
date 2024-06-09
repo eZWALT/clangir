@@ -231,6 +231,7 @@ mlir::LogicalResult CIRGenFunction::buildStmt(const Stmt *S,
   case Stmt::OMPTargetParallelDirectiveClass:
   case Stmt::OMPTargetParallelForDirectiveClass:
   case Stmt::OMPTaskLoopSimdDirectiveClass:
+  case Stmt::OMPTaskLoopDirectiveClass:
   case Stmt::OMPMaskedTaskLoopDirectiveClass:
   case Stmt::OMPMaskedTaskLoopSimdDirectiveClass:
   case Stmt::OMPMasterTaskLoopDirectiveClass:
