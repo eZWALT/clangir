@@ -2584,9 +2584,12 @@ Address CIRGenFunction::buildLoadOfReference(LValue RefLVal, mlir::Location Loc,
       Loc, RefLVal.getAddress().getElementType(),
       RefLVal.getAddress().getPointer());
 
+  llvm::errs() << "LOAAAD OP: " << Load << "\n";
+
   // TODO(cir): DecorateInstructionWithTBAA relevant for us?
   assert(!UnimplementedFeature::tbaa());
-
+  llvm::errs() << "GET TYPE: " << RefLVal.getType()  <<  "\n";
+  llvm::errs() << "POINTEE TYPE: " << RefLVal.getType()->getPointeeType() << "\n";
   QualType PointeeType = RefLVal.getType()->getPointeeType();
   CharUnits Align = CGM.getNaturalTypeAlignment(PointeeType, PointeeBaseInfo,
                                                 /* forPointeeType= */ true);

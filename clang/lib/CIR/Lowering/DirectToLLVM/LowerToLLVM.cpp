@@ -2929,6 +2929,7 @@ class CIRUnrealizedConversionLowering: public mlir::OpConversionPattern<mlir::Un
         // Check for bit width mismatch
         if (inputIntType.getWidth() > outputIntType.getWidth()) {
             // Insert TruncIOp to truncate the input to the output type
+            //Similar result could be achieved using the arith.cmpi instruction
             auto truncatedValue = rewriter.create<mlir::arith::TruncIOp>(op.getLoc(), outputType, adaptor.getInputs()[0]);
             rewriter.replaceOp(op, truncatedValue);
             return mlir::success();

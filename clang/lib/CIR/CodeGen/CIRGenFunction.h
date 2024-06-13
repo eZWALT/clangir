@@ -1004,6 +1004,7 @@ public:
   buildOMPTaskgroupDirective(const OMPTaskgroupDirective &S);
   mlir::LogicalResult buildOMPCriticalDirective(const OMPCriticalDirective &S);
   mlir::LogicalResult buildOMPMasterDirective(const OMPMasterDirective &S);
+  mlir::LogicalResult buildOMPSingleDirective(const OMPSingleDirective &S);
 
   template <typename OmpOp>
   mlir::LogicalResult

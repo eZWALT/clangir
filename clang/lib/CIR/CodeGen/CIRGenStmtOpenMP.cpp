@@ -235,12 +235,38 @@ CIRGenFunction::buildOMPMasterDirective(const OMPMasterDirective &S) {
   mlir::omp::MasterOp masterOp = builder.create<mlir::omp::MasterOp>(scopeLoc);
   const Stmt *capturedStmt = S.getAssociatedStmt();
 
-  // if(!capturedStmt) return mlir::failure();
   mlir::Block &block = masterOp.getRegion().emplaceBlock();
   mlir::OpBuilder::InsertionGuard guardCase(builder);
   builder.setInsertionPointToEnd(&block);
 
   // Build an scope for the critical region
+  builder.create<mlir::cir::ScopeOp>(
+      scopeLoc, /*scopeBuilder=*/
+      [&](mlir::OpBuilder &b, mlir::Location loc) {
+        LexicalScope lexScope{*this, scopeLoc, builder.getInsertionBlock()};
+        // Emit the statement within the critical region
+        if (buildStmt(capturedStmt, /*useCurrentScope=*/true).failed())
+          res = mlir::failure();
+      });
+  builder.create<TerminatorOp>(getLoc(S.getSourceRange().getEnd()));
+  return res;
+}
+
+mlir::LogicalResult 
+CIRGenFunction::buildOMPSingleDirective(const OMPSingleDirective &S){
+  mlir::LogicalResult res = mlir::success();
+  auto scopeLoc = getLoc(S.getSourceRange());
+
+  //WIP: treatment of single clauses
+  mlir::omp::SingleClauseOps clauseOps;
+  auto singleOp = builder.create<mlir::omp::SingleOp>(scopeLoc, clauseOps);
+  const Stmt* capturedStmt = S.getInnermostCapturedStmt()->getCapturedStmt();
+
+  mlir::Block& block = singleOp.getRegion().emplaceBlock();
+  mlir::OpBuilder::InsertionGuard guardCase(builder);
+  builder.setInsertionPointToEnd(&block);
+
+    // Build an scope for the critical region
   builder.create<mlir::cir::ScopeOp>(
       scopeLoc, /*scopeBuilder=*/
       [&](mlir::OpBuilder &b, mlir::Location loc) {

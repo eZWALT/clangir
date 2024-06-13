@@ -17,6 +17,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CIRClauseProcessor.h"
+#include "Address.h"
 #include "CIRGenBuilder.h"
 #include "CIRGenOpenMPRuntime.h"
 #include <clang/AST/ASTFwd.h>
@@ -173,11 +174,7 @@ bool CIRClauseProcessor::processDepend(mlir::omp::DependClauseOps &result,
         // Get an mlir value for the pointer of each variable in the var list
         for (auto varIt = capturedVarsBegin; varIt != capturedVarsEnd;
              ++varIt) {
-          const clang::DeclRefExpr *varRef =
-              dyn_cast<clang::DeclRefExpr>(*varIt);
-          // Print the DeclRefExpr details
-          llvm::errs() << "DeclRefExpr found:\n";
-          llvm::errs() << "  Type: " << varRef->getType().getAsString() << "\n";
+          const clang::DeclRefExpr *varRef = dyn_cast<clang::DeclRefExpr>(*varIt);
           auto varDecl = varRef->getDecl();
 
           if (varRef) {
@@ -186,16 +183,21 @@ bool CIRClauseProcessor::processDepend(mlir::omp::DependClauseOps &result,
             llvm::errs() << "  Type: " << varDecl->getType().getAsString() << "\n";
 
             cir::LValue capturedLvalue = this->CGF.buildLValue(varRef);
+            printLValueDetails(capturedLvalue);
             mlir::Value capturedValue = this->CGF.buildLoadOfScalar(capturedLvalue, location);
+            llvm::errs() << "CAP VALUE: " << capturedValue << "\n"; 
+            cir::Address capturedAddress = this->CGF.buildLoadOfReference(capturedLvalue, location);
+            mlir::Value rawPointer = capturedAddress.emitRawPointer();
+            llvm::errs() << "RAUW POINTER: " << rawPointer << "\n";
             
-            llvm::errs() << "LOAD OF SCALAR: " << capturedValue << "\n";
-
+            /*
             mlir::ValueRange capturedRange(capturedValue);
             mlir::Type uint32Ty = builder.getI32Type();
             auto scopeLoc = this->CGF.getLoc(dirCtx.getSourceRange());
             mlir::Value castedValue = builder.create<mlir::UnrealizedConversionCastOp>(scopeLoc, uint32Ty, capturedRange).getResult(0);
+            */
 
-            result.dependVars.push_back(castedValue);
+            result.dependVars.push_back(rawPointer);
             result.dependTypeAttrs.push_back(dependType);
           } else {
             // Fail
