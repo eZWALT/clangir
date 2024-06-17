@@ -186,6 +186,17 @@ mlir::LogicalResult CIRGenFunction::buildStmt(const Stmt *S,
     return buildOMPTaskyieldDirective(cast<OMPTaskyieldDirective>(*S));
   case Stmt::OMPBarrierDirectiveClass:
     return buildOMPBarrierDirective(cast<OMPBarrierDirective>(*S));
+  case Stmt::OMPTaskDirectiveClass:
+    return buildOMPTaskDirective(cast<OMPTaskDirective>(*S));
+  case Stmt::OMPTaskgroupDirectiveClass:
+    return buildOMPTaskgroupDirective(cast<OMPTaskgroupDirective>(*S));
+  case Stmt::OMPMasterDirectiveClass:
+    return buildOMPMasterDirective(cast<OMPMasterDirective>(*S));
+  case Stmt::OMPSingleDirectiveClass:
+    return buildOMPSingleDirective(cast<OMPSingleDirective>(*S));
+  case Stmt::OMPCriticalDirectiveClass:
+    return buildOMPCriticalDirective(cast<OMPCriticalDirective>(*S));
+
   // Unsupported AST nodes:
   case Stmt::CapturedStmtClass:
   case Stmt::ObjCAtTryStmtClass:
@@ -203,15 +214,10 @@ mlir::LogicalResult CIRGenFunction::buildStmt(const Stmt *S,
   case Stmt::OMPForSimdDirectiveClass:
   case Stmt::OMPSectionsDirectiveClass:
   case Stmt::OMPSectionDirectiveClass:
-  case Stmt::OMPSingleDirectiveClass:
-  case Stmt::OMPMasterDirectiveClass:
-  case Stmt::OMPCriticalDirectiveClass:
   case Stmt::OMPParallelForDirectiveClass:
   case Stmt::OMPParallelForSimdDirectiveClass:
   case Stmt::OMPParallelMasterDirectiveClass:
   case Stmt::OMPParallelSectionsDirectiveClass:
-  case Stmt::OMPTaskDirectiveClass:
-  case Stmt::OMPTaskgroupDirectiveClass:
   case Stmt::OMPFlushDirectiveClass:
   case Stmt::OMPDepobjDirectiveClass:
   case Stmt::OMPScanDirectiveClass:
